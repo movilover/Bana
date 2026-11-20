@@ -38,7 +38,7 @@ jobs:
           REPO="${GITHUB_REPOSITORY#*/}"
           if [[ "$REPO" == *.github.io ]]; then echo "path=/" >> "$GITHUB_OUTPUT"; else echo "path=/${REPO}/" >> "$GITHUB_OUTPUT"; fi
 
-      - run: npm ci
+      - run: npm install
 
       - name: Build (Spark/free plan by default)
         run: npm run build
