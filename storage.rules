@@ -1,0 +1,144 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isSafeImage() {
+      return request.resource != null
+        && request.resource.contentType.matches('image/(jpeg|jpg|png|webp|gif)')
+        && request.resource.size <= 15 * 1024 * 1024;
+    }
+
+    function isSafeVideo() {
+      return request.resource != null
+        && request.resource.contentType.matches('video/(mp4|webm|quicktime)')
+        && request.resource.size <= 150 * 1024 * 1024;
+    }
+
+    function isSafeAudio() {
+      return request.resource != null
+        && request.resource.contentType.matches('audio/(webm|ogg|mp4|mpeg|wav|aac)')
+        && request.resource.size <= 15 * 1024 * 1024;
+    }
+
+    function isSafeDocument() {
+      return request.resource != null
+        && request.resource.contentType.matches('application/pdf|text/plain|application/zip')
+        && request.resource.size <= 25 * 1024 * 1024;
+    }
+
+    function isSafeCaptions() {
+      return request.resource != null
+        && request.resource.contentType.matches('text/vtt|text/plain')
+        && request.resource.size <= 2 * 1024 * 1024;
+    }
+
+    // Profile avatars and cover photos
+    match /users/{uid}/{fileName} {
+      allow read: if true;
+      allow create, update: if isOwner(uid) && isSafeImage();
+      allow delete: if isOwner(uid);
+    }
+
+    // Feed post images, thumbnails, videos, and voice posts
+    match /posts/{uid}/{fileName} {
+      allow read: if true;
+      allow create, update: if isOwner(uid) && (isSafeImage() || isSafeVideo() || isSafeAudio());
+      allow delete: if isOwner(uid);
+    }
+
+    // Vertical Reels videos, thumbnails, and WebVTT captions
+    match /reels/{uid}/{fileName} {
+      allow read: if true;
+      allow create, update: if isOwner(uid) && (isSafeVideo() || isSafeImage() || isSafeCaptions());
+      allow delete: if isOwner(uid);
+    }
+
+    // 24h Stories
+    match /stories/{uid}/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(uid) && (isSafeImage() || isSafeVideo());
+      allow delete: if isOwner(uid);
+    }
+
+    // Voice comments
+    match /voice/{uid}/{fileName} {
+      allow read: if true;
+      allow create, update: if isOwner(uid) && isSafeAudio();
+      allow delete: if isOwner(uid);
+    }
+
+    // Messenger attachments (scoped by uploader UID; signed-in authenticated access)
+    match /messages/{conversationId}/{uid}/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(uid) && (isSafeImage() || isSafeVideo() || isSafeAudio() || isSafeDocument());
+      allow delete: if isOwner(uid);
+    }
+
+    // Group conversation avatars
+    match /groups/{uid}/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(uid) && isSafeImage();
+      allow delete: if isOwner(uid);
+    }
+
+    // Marketplace product photos
+    match /market/{uid}/{fileName} {
+      allow read: if true;
+      allow create, update: if isOwner(uid) && isSafeImage();
+      allow delete: if isOwner(uid);
+    }
+
+    // Seller store logos & cover images
+    match /stores/{uid}/{fileName} {
+      allow read: if true;
+      allow create, update: if isOwner(uid) && isSafeImage();
+      allow delete: if isOwner(uid);
+    }
+
+    // Verified product review photos
+    match /reviews/{uid}/{fileName} {
+      allow read: if true;
+      allow create, update: if isOwner(uid) && isSafeImage();
+      allow delete: if isOwner(uid);
+    }
+
+    // Community covers, avatars, and post media
+    match /communities/{uid}/{fileName} {
+      allow read: if true;
+      allow create, update: if isOwner(uid) && (isSafeImage() || isSafeVideo());
+      allow delete: if isOwner(uid);
+    }
+
+    // Ad creative uploads
+    match /ads/{uid}/{fileName} {
+      allow read: if true;
+      allow create, update: if isOwner(uid) && (isSafeImage() || isSafeVideo());
+      allow delete: if isOwner(uid);
+    }
+
+    // Identity & Organization verification proof documents (STRICTLY PRIVATE: owner & admins only; immutable once uploaded)
+    match /verifications/{uid}/{fileName} {
+      allow read: if isOwner(uid) || (
+        isSignedIn() && (
+          (request.auth.token.email_verified == true && request.auth.token.email == 'omor.faruk.sojol.2@gmail.com') ||
+          request.auth.token.adminRole in ['super_admin', 'admin', 'moderator', 'support_staff', 'support_manager']
+        )
+      );
+      allow create, update: if isOwner(uid) && (isSafeImage() || isSafeDocument());
+      allow delete: if false;
+    }
+
+    // Default deny everything else (including executables)
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

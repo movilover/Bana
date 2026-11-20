@@ -1,0 +1,927 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Public and core profile record for a BANA user.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "minLength": 3, "maxLength": 30, "pattern": "^[a-z0-9_\\.]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "bio": { "type": "string", "maxLength": 300 },
+        "avatarUrl": { "type": "string", "maxLength": 1000 },
+        "coverUrl": { "type": "string", "maxLength": 1000 },
+        "location": { "type": "string", "maxLength": 100 },
+        "website": { "type": "string", "maxLength": 200 },
+        "isVerified": { "type": "boolean" },
+        "isCreator": { "type": "boolean" },
+        "isMinor": { "type": "boolean" },
+        "accountStatus": { "type": "string", "enum": ["active", "suspended", "banned"] },
+        "followersCount": { "type": "number" },
+        "followingCount": { "type": "number" },
+        "friendsCount": { "type": "number" },
+        "postsCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "username", "displayName", "isVerified", "isCreator", "accountStatus", "followersCount", "followingCount", "createdAt"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "Private user preferences, privacy settings, and PII.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 254 },
+        "birthYear": { "type": "number" },
+        "themeMode": { "type": "string", "enum": ["light", "dark", "system"] },
+        "messengerTheme": { "type": "string", "enum": ["light", "dark", "match"] },
+        "whoCanSeePosts": { "type": "string", "enum": ["public", "followers", "friends", "only_me"] },
+        "whoCanMessage": { "type": "string", "enum": ["everyone", "followers", "friends", "nobody"] },
+        "whoCanComment": { "type": "string", "enum": ["everyone", "followers", "friends"] },
+        "whoCanFollow": { "type": "string", "enum": ["everyone", "approval"] },
+        "showOnlineStatus": { "type": "boolean" },
+        "showReadReceipts": { "type": "boolean" },
+        "showPersonalInfo": { "type": "boolean" },
+        "notificationPrefs": { "type": "object" },
+        "interests": { "type": "array" },
+        "interestWeights": { "type": "object" },
+        "hiddenCreatorIds": { "type": "array" },
+        "dismissedPostIds": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "themeMode", "messengerTheme", "updatedAt"]
+    },
+    "Post": {
+      "title": "Post",
+      "description": "Social feed post supporting text, images, video, poll, voice, or shared post.",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string", "maxLength": 128 },
+        "authorUsername": { "type": "string", "maxLength": 30 },
+        "authorName": { "type": "string", "maxLength": 80 },
+        "authorAvatar": { "type": "string", "maxLength": 1000 },
+        "authorVerified": { "type": "boolean" },
+        "type": { "type": "string", "enum": ["text", "image", "gallery", "video", "voice", "poll", "shared"] },
+        "category": { "type": "string", "enum": ["Technology", "Entertainment", "Education", "Business", "Sports", "Lifestyle", "Travel", "Gaming", "News & Community"] },
+        "content": { "type": "string", "maxLength": 5000 },
+        "mediaUrls": { "type": "array" },
+        "thumbnailUrl": { "type": "string", "maxLength": 1000 },
+        "audioUrl": { "type": "string", "maxLength": 1000 },
+        "audioDuration": { "type": "number" },
+        "pollQuestion": { "type": "string", "maxLength": 300 },
+        "pollOptions": { "type": "array" },
+        "hashtags": { "type": "array" },
+        "taggedUsernames": { "type": "array" },
+        "locationName": { "type": "string", "maxLength": 120 },
+        "communityId": { "type": "string", "maxLength": 128 },
+        "sharedPostId": { "type": "string", "maxLength": 128 },
+        "visibility": { "type": "string", "enum": ["public", "followers", "friends", "only_me"] },
+        "status": { "type": "string", "enum": ["published", "draft", "removed"] },
+        "likesCount": { "type": "number" },
+        "commentsCount": { "type": "number" },
+        "sharesCount": { "type": "number" },
+        "viewsCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorId", "type", "visibility", "status", "likesCount", "commentsCount", "sharesCount", "createdAt"]
+    },
+    "Reel": {
+      "title": "Reel",
+      "description": "Vertical 9:16 short-form video.",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string", "maxLength": 128 },
+        "authorUsername": { "type": "string", "maxLength": 30 },
+        "authorName": { "type": "string", "maxLength": 80 },
+        "authorAvatar": { "type": "string", "maxLength": 1000 },
+        "authorVerified": { "type": "boolean" },
+        "videoUrl": { "type": "string", "maxLength": 1000 },
+        "thumbnailUrl": { "type": "string", "maxLength": 1000 },
+        "caption": { "type": "string", "maxLength": 2000 },
+        "soundName": { "type": "string", "maxLength": 140 },
+        "hashtags": { "type": "array" },
+        "durationSeconds": { "type": "number" },
+        "visibility": { "type": "string", "enum": ["public", "followers", "only_me"] },
+        "status": { "type": "string", "enum": ["active", "removed"] },
+        "likesCount": { "type": "number" },
+        "commentsCount": { "type": "number" },
+        "sharesCount": { "type": "number" },
+        "viewsCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorId", "videoUrl", "visibility", "status", "likesCount", "commentsCount", "viewsCount", "createdAt"]
+    },
+    "Story": {
+      "title": "Story",
+      "description": "24-hour ephemeral image, video, or text story.",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string", "maxLength": 128 },
+        "authorUsername": { "type": "string", "maxLength": 30 },
+        "authorName": { "type": "string", "maxLength": 80 },
+        "authorAvatar": { "type": "string", "maxLength": 1000 },
+        "mediaUrl": { "type": "string", "maxLength": 1000 },
+        "mediaType": { "type": "string", "enum": ["image", "video", "text"] },
+        "bgGradient": { "type": "string", "maxLength": 120 },
+        "caption": { "type": "string", "maxLength": 300 },
+        "visibility": { "type": "string", "enum": ["public", "followers", "friends"] },
+        "viewsCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorId", "mediaType", "visibility", "createdAt", "expiresAt"]
+    },
+    "SavedItem": {
+      "title": "SavedItem",
+      "description": "User's private bookmark referencing a post, photo, video, or reel.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "postId": { "type": "string", "maxLength": 128 },
+        "targetType": { "type": "string", "enum": ["post", "photo", "video", "reel"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "postId", "createdAt"]
+    },
+    "RecentSearch": {
+      "title": "RecentSearch",
+      "description": "User's recent global search history entry.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "query": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "query", "createdAt"]
+    },
+    "Comment": {
+      "title": "Comment",
+      "description": "Text comment on a post or reel.",
+      "type": "object",
+      "properties": {
+        "targetType": { "type": "string", "enum": ["post", "reel"] },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "authorId": { "type": "string", "maxLength": 128 },
+        "authorUsername": { "type": "string", "maxLength": 30 },
+        "authorName": { "type": "string", "maxLength": 80 },
+        "authorAvatar": { "type": "string", "maxLength": 1000 },
+        "content": { "type": "string", "minLength": 1, "maxLength": 1500 },
+        "parentCommentId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["targetType", "targetId", "authorId", "content", "createdAt"]
+    },
+    "VoiceComment": {
+      "title": "VoiceComment",
+      "description": "Recorded voice comment stored in Firebase Storage.",
+      "type": "object",
+      "properties": {
+        "targetType": { "type": "string", "enum": ["post", "reel"] },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "authorId": { "type": "string", "maxLength": 128 },
+        "authorUsername": { "type": "string", "maxLength": 30 },
+        "authorName": { "type": "string", "maxLength": 80 },
+        "authorAvatar": { "type": "string", "maxLength": 1000 },
+        "audioUrl": { "type": "string", "maxLength": 1000 },
+        "durationSeconds": { "type": "number" },
+        "waveform": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["targetType", "targetId", "authorId", "audioUrl", "durationSeconds", "createdAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Direct or group conversation in BANA Messenger.",
+      "type": "object",
+      "properties": {
+        "participantIds": { "type": "array" },
+        "isGroup": { "type": "boolean" },
+        "groupName": { "type": "string", "maxLength": 100 },
+        "groupAvatar": { "type": "string", "maxLength": 1000 },
+        "lastMessageText": { "type": "string", "maxLength": 500 },
+        "lastMessageSenderId": { "type": "string", "maxLength": 128 },
+        "isRequest": { "type": "boolean" },
+        "requestRecipientId": { "type": "string", "maxLength": 128 },
+        "mutedBy": { "type": "array" },
+        "archivedBy": { "type": "array" },
+        "unreadCounts": { "type": "object" },
+        "typingUsers": { "type": "object" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["participantIds", "isGroup", "updatedAt", "createdAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Message inside a BANA Messenger conversation.",
+      "type": "object",
+      "properties": {
+        "conversationId": { "type": "string", "maxLength": 128 },
+        "senderId": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "enum": ["text", "image", "video", "voice", "file"] },
+        "text": { "type": "string", "maxLength": 4000 },
+        "mediaUrl": { "type": "string", "maxLength": 1000 },
+        "fileName": { "type": "string", "maxLength": 200 },
+        "fileSize": { "type": "number" },
+        "audioDuration": { "type": "number" },
+        "replyToId": { "type": "string", "maxLength": 128 },
+        "replyPreview": { "type": "string", "maxLength": 200 },
+        "reactions": { "type": "object" },
+        "readBy": { "type": "array" },
+        "isEdited": { "type": "boolean" },
+        "isDeleted": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["conversationId", "senderId", "type", "createdAt"]
+    },
+    "Community": {
+      "title": "Community",
+      "description": "BANA community or interest group with optional Bangladesh district discovery.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "slug": { "type": "string", "maxLength": 90 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "category": { "type": "string", "maxLength": 60 },
+        "district": { "type": "string", "maxLength": 60 },
+        "coverUrl": { "type": "string", "maxLength": 1000 },
+        "avatarUrl": { "type": "string", "maxLength": 1000 },
+        "creatorId": { "type": "string", "maxLength": 128 },
+        "privacy": { "type": "string", "enum": ["public", "private"] },
+        "requiresApproval": { "type": "boolean" },
+        "rules": { "type": "array" },
+        "announcement": { "type": "string", "maxLength": 500 },
+        "membersCount": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "suspended"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "creatorId", "privacy", "membersCount", "status", "createdAt"]
+    },
+    "MarketplaceListing": {
+      "title": "MarketplaceListing",
+      "description": "Product or service listing in BANA Marketplace.",
+      "type": "object",
+      "properties": {
+        "sellerId": { "type": "string", "maxLength": 128 },
+        "sellerName": { "type": "string", "maxLength": 80 },
+        "sellerUsername": { "type": "string", "maxLength": 30 },
+        "sellerAvatar": { "type": "string", "maxLength": 1000 },
+        "title": { "type": "string", "minLength": 3, "maxLength": 120 },
+        "description": { "type": "string", "minLength": 10, "maxLength": 2500 },
+        "price": { "type": "number" },
+        "currency": { "type": "string", "enum": ["BDT", "USD", "EUR", "GBP"] },
+        "category": { "type": "string", "enum": ["Electronics", "Fashion", "Home & Living", "Vehicles", "Services", "Books", "Sports", "Other"] },
+        "condition": { "type": "string", "enum": ["New", "Like New", "Used", "Refurbished"] },
+        "location": { "type": "string", "maxLength": 100 },
+        "imageUrls": { "type": "array" },
+        "status": { "type": "string", "enum": ["active", "pending_review", "sold", "rejected"] },
+        "viewsCount": { "type": "number" },
+        "savesCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["sellerId", "title", "price", "currency", "category", "location", "status", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Real-time notification event for a user.",
+      "type": "object",
+      "properties": {
+        "recipientId": { "type": "string", "maxLength": 128 },
+        "actorId": { "type": "string", "maxLength": 128 },
+        "actorName": { "type": "string", "maxLength": 80 },
+        "actorAvatar": { "type": "string", "maxLength": 1000 },
+        "type": { "type": "string", "enum": ["like", "comment", "reply", "follow", "friend_request", "message", "mention", "community", "marketplace", "monetization", "ad"] },
+        "title": { "type": "string", "maxLength": 160 },
+        "body": { "type": "string", "maxLength": 400 },
+        "linkUrl": { "type": "string", "maxLength": 300 },
+        "dedupeKey": { "type": "string", "maxLength": 200 },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["recipientId", "type", "title", "isRead", "createdAt"]
+    },
+    "CreatorApplication": {
+      "title": "CreatorApplication",
+      "description": "Creator monetization eligibility application.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 30 },
+        "followerCountAtApply": { "type": "number" },
+        "country": { "type": "string", "maxLength": 60 },
+        "payoutCategory": { "type": "string", "maxLength": 60 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected", "appealed"] },
+        "rejectionReason": { "type": "string", "maxLength": 500 },
+        "appealNote": { "type": "string", "maxLength": 1000 },
+        "reviewedBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "followerCountAtApply", "status", "createdAt"]
+    },
+    "CreatorEarning": {
+      "title": "CreatorEarning",
+      "description": "Server-calculated creator earnings ledger entry.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "sourceType": { "type": "string", "enum": ["video_views", "content_engagement", "ad_rev_share", "adjustment"] },
+        "amountUsd": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "approved", "paid"] },
+        "period": { "type": "string", "maxLength": 30 },
+        "description": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "sourceType", "amountUsd", "status", "createdAt"]
+    },
+    "PayoutRequest": {
+      "title": "PayoutRequest",
+      "description": "Creator payout withdrawal request.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "amountUsd": { "type": "number" },
+        "method": { "type": "string", "maxLength": 60 },
+        "accountLabel": { "type": "string", "maxLength": 140 },
+        "country": { "type": "string", "maxLength": 60 },
+        "status": { "type": "string", "enum": ["pending", "processing", "paid", "rejected"] },
+        "adminNote": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "amountUsd", "method", "accountLabel", "status", "createdAt"]
+    },
+    "AdCampaign": {
+      "title": "AdCampaign",
+      "description": "Self-service advertising campaign requiring admin review.",
+      "type": "object",
+      "properties": {
+        "advertiserId": { "type": "string", "maxLength": 128 },
+        "campaignName": { "type": "string", "minLength": 3, "maxLength": 100 },
+        "headline": { "type": "string", "maxLength": 120 },
+        "bodyText": { "type": "string", "maxLength": 400 },
+        "creativeUrl": { "type": "string", "maxLength": 1000 },
+        "creativeType": { "type": "string", "enum": ["image", "video"] },
+        "destinationUrl": { "type": "string", "maxLength": 500 },
+        "dailyBudgetUsd": { "type": "number" },
+        "totalBudgetUsd": { "type": "number" },
+        "startDate": { "type": "string", "maxLength": 30 },
+        "endDate": { "type": "string", "maxLength": 30 },
+        "status": { "type": "string", "enum": ["draft", "pending_review", "approved", "active", "paused", "rejected", "completed"] },
+        "rejectionReason": { "type": "string", "maxLength": 400 },
+        "impressions": { "type": "number" },
+        "clicks": { "type": "number" },
+        "spentUsd": { "type": "number" },
+        "minorSafeAttested": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["advertiserId", "campaignName", "destinationUrl", "dailyBudgetUsd", "totalBudgetUsd", "status", "minorSafeAttested", "createdAt"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "User safety and content moderation report.",
+      "type": "object",
+      "properties": {
+        "reporterId": { "type": "string", "maxLength": 128 },
+        "targetType": { "type": "string", "enum": ["user", "post", "reel", "comment", "voice_comment", "message", "listing", "community", "ad"] },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "reason": { "type": "string", "maxLength": 120 },
+        "details": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["pending", "reviewing", "resolved", "dismissed"] },
+        "resolutionNote": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["reporterId", "targetType", "targetId", "reason", "status", "createdAt"]
+    },
+    "AdminRole": {
+      "title": "AdminRole",
+      "description": "Server-authoritative admin role assignment.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 254 },
+        "role": { "type": "string", "enum": ["super_admin", "moderator", "finance_manager", "content_manager", "support_manager"] },
+        "assignedBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "role", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable admin action audit trail.",
+      "type": "object",
+      "properties": {
+        "actorUid": { "type": "string", "maxLength": 128 },
+        "actorEmail": { "type": "string", "maxLength": 254 },
+        "action": { "type": "string", "maxLength": 120 },
+        "targetType": { "type": "string", "maxLength": 60 },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "summary": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["actorUid", "action", "targetType", "targetId", "createdAt"]
+    },
+    "Event": {
+      "title": "Event",
+      "description": "Local community event and meetup listing.",
+      "type": "object",
+      "properties": {
+        "organizerId": { "type": "string", "maxLength": 128 },
+        "organizerName": { "type": "string", "maxLength": 80 },
+        "communityId": { "type": "string", "maxLength": 128 },
+        "communityName": { "type": "string", "maxLength": 80 },
+        "title": { "type": "string", "minLength": 3, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "category": { "type": "string", "maxLength": 40 },
+        "district": { "type": "string", "maxLength": 60 },
+        "venue": { "type": "string", "maxLength": 180 },
+        "eventDate": { "type": "string", "maxLength": 30 },
+        "capacity": { "type": "number" },
+        "attendeesCount": { "type": "number" },
+        "status": { "type": "string", "enum": ["upcoming", "cancelled", "completed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["organizerId", "title", "district", "venue", "eventDate", "capacity", "attendeesCount", "status", "createdAt"]
+    },
+    "EventRegistration": {
+      "title": "EventRegistration",
+      "description": "User RSVP registration for a local event.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "userId", "createdAt"]
+    },
+    "BoostPackage": {
+      "title": "BoostPackage",
+      "description": "Admin-configured marketplace slot and post boosting package.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 80 },
+        "packageType": { "type": "string", "enum": ["boost_post", "marketplace_slot"] },
+        "priceBdt": { "type": "number" },
+        "priceUsd": { "type": "number" },
+        "durationDays": { "type": "number" },
+        "estimatedReach": { "type": "number" },
+        "listingSlots": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "packageType", "priceBdt", "priceUsd", "durationDays", "estimatedReach", "isActive", "createdAt"]
+    },
+    "PaymentRequest": {
+      "title": "PaymentRequest",
+      "description": "User-submitted payment & transaction ID for extra marketplace posts or boosting.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "packageId": { "type": "string", "maxLength": 128 },
+        "packageName": { "type": "string", "maxLength": 100 },
+        "requestType": { "type": "string", "enum": ["boost_post", "marketplace_slot"] },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "paymentMethod": { "type": "string", "maxLength": 40 },
+        "senderNumber": { "type": "string", "maxLength": 60 },
+        "transactionId": { "type": "string", "maxLength": 120 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "packageId", "requestType", "transactionId", "status", "createdAt"]
+    },
+    "FriendRequest": {
+      "title": "FriendRequest",
+      "description": "Two-way friend connection request between BANA users.",
+      "type": "object",
+      "properties": {
+        "fromUid": { "type": "string", "maxLength": 128 },
+        "toUid": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["pending", "accepted", "declined"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fromUid", "toUid", "status", "createdAt"]
+    },
+    "Friendship": {
+      "title": "Friendship",
+      "description": "Confirmed bidirectional friendship between two users with sorted deterministic pair ID.",
+      "type": "object",
+      "properties": {
+        "participants": { "type": "array" },
+        "initiatedBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["participants", "initiatedBy", "createdAt"]
+    },
+    "FollowRequest": {
+      "title": "FollowRequest",
+      "description": "Follow request for private or approval-required BANA accounts.",
+      "type": "object",
+      "properties": {
+        "fromUid": { "type": "string", "maxLength": 128 },
+        "toUid": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["pending", "accepted", "declined"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fromUid", "toUid", "status", "createdAt"]
+    },
+    "UserRestriction": {
+      "title": "UserRestriction",
+      "description": "Private restriction record limiting interactions from another account.",
+      "type": "object",
+      "properties": {
+        "restrictorId": { "type": "string", "maxLength": 128 },
+        "restrictedUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["restrictorId", "restrictedUid", "createdAt"]
+    },
+    "VerificationRequest": {
+      "title": "VerificationRequest",
+      "description": "Identity or organization profile verification application reviewed by BANA administrators.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 30 },
+        "verificationType": { "type": "string", "enum": ["identity", "organization"] },
+        "fullName": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "category": { "type": "string", "maxLength": 60 },
+        "proofDocUrl": { "type": "string", "maxLength": 1000 },
+        "publicLinks": { "type": "array" },
+        "statement": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected", "needs_info"] },
+        "adminNote": { "type": "string", "maxLength": 500 },
+        "reviewedBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "verificationType", "fullName", "category", "proofDocUrl", "status", "createdAt"]
+    },
+    "ProfileView": {
+      "title": "ProfileView",
+      "description": "Deduplicated profile visit telemetry readable only by the profile owner and admins.",
+      "type": "object",
+      "properties": {
+        "profileUid": { "type": "string", "maxLength": 128 },
+        "viewerUid": { "type": "string", "maxLength": 128 },
+        "dayKey": { "type": "string", "maxLength": 16 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["profileUid", "viewerUid", "dayKey", "createdAt"]
+    },
+    "ProductCategory": {
+      "title": "ProductCategory",
+      "description": "Admin-managed marketplace product category with subcategories and sort order.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "slug": { "type": "string", "maxLength": 80 },
+        "subcategories": { "type": "array" },
+        "sortOrder": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "slug", "sortOrder", "isActive", "createdAt"]
+    },
+    "SellerStore": {
+      "title": "SellerStore",
+      "description": "BANA Marketplace seller storefront profile and rating summary.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "ownerUsername": { "type": "string", "maxLength": 30 },
+        "name": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "slug": { "type": "string", "maxLength": 90 },
+        "description": { "type": "string", "maxLength": 1200 },
+        "logoUrl": { "type": "string", "maxLength": 1000 },
+        "coverUrl": { "type": "string", "maxLength": 1000 },
+        "contactPreference": { "type": "string", "enum": ["messenger", "phone", "both"] },
+        "district": { "type": "string", "maxLength": 60 },
+        "ratingAvg": { "type": "number" },
+        "reviewsCount": { "type": "number" },
+        "totalSales": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "restricted", "suspended"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "name", "status", "createdAt"]
+    },
+    "ShoppingCart": {
+      "title": "ShoppingCart",
+      "description": "Authenticated user shopping cart synced across devices.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "items": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "items", "updatedAt"]
+    },
+    "WishlistItem": {
+      "title": "WishlistItem",
+      "description": "User saved marketplace product wishlist record.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "productId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "productId", "createdAt"]
+    },
+    "MarketplaceOrder": {
+      "title": "MarketplaceOrder",
+      "description": "Server-validated marketplace order with status lifecycle.",
+      "type": "object",
+      "properties": {
+        "idempotencyKey": { "type": "string", "maxLength": 128 },
+        "buyerId": { "type": "string", "maxLength": 128 },
+        "sellerId": { "type": "string", "maxLength": 128 },
+        "storeId": { "type": "string", "maxLength": 128 },
+        "subtotal": { "type": "number" },
+        "deliveryFee": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "currency": { "type": "string", "enum": ["BDT", "USD", "EUR", "GBP"] },
+        "paymentMethod": { "type": "string", "enum": ["cod", "bkash", "nagad", "card_gateway"] },
+        "paymentStatus": { "type": "string", "enum": ["pending_cod", "awaiting_verification", "paid", "failed", "refund_requested", "refunded"] },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "processing", "shipped", "delivered", "cancelled", "refunded"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["idempotencyKey", "buyerId", "sellerId", "totalAmount", "currency", "status", "createdAt"]
+    },
+    "MarketplaceOrderItem": {
+      "title": "MarketplaceOrderItem",
+      "description": "Line item snapshot belonging to a marketplace order.",
+      "type": "object",
+      "properties": {
+        "orderId": { "type": "string", "maxLength": 128 },
+        "buyerId": { "type": "string", "maxLength": 128 },
+        "sellerId": { "type": "string", "maxLength": 128 },
+        "productId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 120 },
+        "unitPrice": { "type": "number" },
+        "quantity": { "type": "number" },
+        "lineTotal": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["orderId", "buyerId", "sellerId", "productId", "unitPrice", "quantity", "createdAt"]
+    },
+    "MarketplacePayment": {
+      "title": "MarketplacePayment",
+      "description": "Order payment and refund status audit record.",
+      "type": "object",
+      "properties": {
+        "orderId": { "type": "string", "maxLength": 128 },
+        "buyerId": { "type": "string", "maxLength": 128 },
+        "sellerId": { "type": "string", "maxLength": 128 },
+        "amount": { "type": "number" },
+        "currency": { "type": "string", "maxLength": 10 },
+        "method": { "type": "string", "maxLength": 40 },
+        "transactionRef": { "type": "string", "maxLength": 120 },
+        "status": { "type": "string", "enum": ["pending_cod", "awaiting_verification", "paid", "failed", "refund_requested", "refunded"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["orderId", "buyerId", "sellerId", "amount", "method", "status", "createdAt"]
+    },
+    "ProductReview": {
+      "title": "ProductReview",
+      "description": "Verified purchase product rating and review.",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string", "maxLength": 128 },
+        "orderId": { "type": "string", "maxLength": 128 },
+        "reviewerId": { "type": "string", "maxLength": 128 },
+        "rating": { "type": "number" },
+        "comment": { "type": "string", "maxLength": 2000 },
+        "isVerifiedPurchase": { "type": "boolean" },
+        "helpfulCount": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "hidden"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["productId", "orderId", "reviewerId", "rating", "isVerifiedPurchase", "createdAt"]
+    },
+    "MarketplaceReport": {
+      "title": "MarketplaceReport",
+      "description": "Report filed against a product, seller store, or review.",
+      "type": "object",
+      "properties": {
+        "reporterId": { "type": "string", "maxLength": 128 },
+        "targetType": { "type": "string", "enum": ["product", "store", "review", "community", "event"] },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "reason": { "type": "string", "maxLength": 120 },
+        "status": { "type": "string", "enum": ["pending", "resolved", "dismissed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["reporterId", "targetType", "targetId", "reason", "status", "createdAt"]
+    },
+    "CommunityRequest": {
+      "title": "CommunityRequest",
+      "description": "Join request or member invite for a BANA community.",
+      "type": "object",
+      "properties": {
+        "communityId": { "type": "string", "maxLength": 128 },
+        "requestType": { "type": "string", "enum": ["join_request", "invite"] },
+        "fromUid": { "type": "string", "maxLength": 128 },
+        "targetUid": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["pending", "approved", "declined"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["communityId", "requestType", "fromUid", "targetUid", "status", "createdAt"]
+    },
+    "CommunityPost": {
+      "title": "CommunityPost",
+      "description": "Group post, announcement, or poll inside a community.",
+      "type": "object",
+      "properties": {
+        "communityId": { "type": "string", "maxLength": 128 },
+        "authorId": { "type": "string", "maxLength": 128 },
+        "kind": { "type": "string", "enum": ["post", "announcement", "poll"] },
+        "content": { "type": "string", "maxLength": 5000 },
+        "isPinned": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["active", "removed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["communityId", "authorId", "kind", "status", "createdAt"]
+    },
+    "CreatorEligibility": {
+      "title": "CreatorEligibility",
+      "description": "Server-evaluated creator monetization eligibility status & outstanding checklist.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "followersCount": { "type": "number" },
+        "requiredFollowers": { "type": "number" },
+        "isAdult": { "type": "boolean" },
+        "isEmailVerified": { "type": "boolean" },
+        "hasOriginalContent": { "type": "boolean" },
+        "isGoodStanding": { "type": "boolean" },
+        "eligibleToApply": { "type": "boolean" },
+        "monetizationStatus": { "type": "string", "enum": ["not_eligible", "eligible", "pending", "needs_info", "approved", "rejected", "suspended"] }
+      },
+      "required": ["uid", "followersCount", "requiredFollowers", "monetizationStatus"]
+    },
+    "MonetizationPolicy": {
+      "title": "MonetizationPolicy",
+      "description": "Admin-configurable creator revenue-share terms and eligibility policy.",
+      "type": "object",
+      "properties": {
+        "monetizationEnabled": { "type": "boolean" },
+        "creatorSharePct": { "type": "number" },
+        "platformSharePct": { "type": "number" },
+        "minFollowers": { "type": "number" },
+        "minPayoutUsd": { "type": "number" },
+        "qualifiedViewMinSeconds": { "type": "number" }
+      },
+      "required": ["monetizationEnabled", "creatorSharePct", "platformSharePct", "minFollowers", "minPayoutUsd"]
+    },
+    "EarningEvent": {
+      "title": "EarningEvent",
+      "description": "Deduplicated content monetization and qualified view earning event.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "contentType": { "type": "string", "enum": ["reel", "video", "post"] },
+        "contentId": { "type": "string", "maxLength": 128 },
+        "qualifiedViews": { "type": "number" },
+        "estimatedAmountUsd": { "type": "number" },
+        "confirmedAmountUsd": { "type": "number" },
+        "status": { "type": "string", "enum": ["estimated", "confirmed", "pending", "adjusted"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "contentType", "contentId", "status", "createdAt"]
+    },
+    "FinancialTransaction": {
+      "title": "FinancialTransaction",
+      "description": "Immutable financial transaction audit ledger for creator earnings, payouts, and ad billing.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "txType": { "type": "string" },
+        "direction": { "type": "string", "enum": ["credit", "debit"] },
+        "amountUsd": { "type": "number" },
+        "currency": { "type": "string", "maxLength": 10 },
+        "referenceId": { "type": "string", "maxLength": 128 },
+        "description": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "txType", "direction", "amountUsd", "createdAt"]
+    },
+    "AdvertiserAccount": {
+      "title": "AdvertiserAccount",
+      "description": "BANA Advertiser billing and business compliance profile.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "businessName": { "type": "string", "maxLength": 120 },
+        "contactEmail": { "type": "string", "maxLength": 200 },
+        "country": { "type": "string", "maxLength": 60 },
+        "status": { "type": "string", "enum": ["active", "restricted", "suspended"] },
+        "walletBalanceUsd": { "type": "number" },
+        "lifetimeSpendUsd": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "businessName", "status", "createdAt"]
+    },
+    "AdCreative": {
+      "title": "AdCreative",
+      "description": "Reusable advertiser creative image or video subject to moderation.",
+      "type": "object",
+      "properties": {
+        "advertiserId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 120 },
+        "headline": { "type": "string", "maxLength": 120 },
+        "mediaUrl": { "type": "string", "maxLength": 1000 },
+        "mediaType": { "type": "string", "enum": ["image", "video"] },
+        "approvalStatus": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["advertiserId", "title", "mediaUrl", "approvalStatus", "createdAt"]
+    },
+    "AdPayment": {
+      "title": "AdPayment",
+      "description": "Advertiser billing deposit / campaign payment verification record.",
+      "type": "object",
+      "properties": {
+        "advertiserId": { "type": "string", "maxLength": 128 },
+        "amountUsd": { "type": "number" },
+        "method": { "type": "string", "enum": ["bkash", "nagad", "bank_transfer", "card_gateway"] },
+        "transactionRef": { "type": "string", "maxLength": 120 },
+        "status": { "type": "string", "enum": ["awaiting_verification", "paid", "failed", "refunded"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["advertiserId", "amountUsd", "method", "status", "createdAt"]
+    },
+    "AdvertisingSettings": {
+      "title": "AdvertisingSettings",
+      "description": "Global ad delivery placements, category blocks, budget minimums, and frequency caps.",
+      "type": "object",
+      "properties": {
+        "adsEnabled": { "type": "boolean" },
+        "enabledPlacements": { "type": "array" },
+        "blockedCategories": { "type": "array" },
+        "defaultCpmUsd": { "type": "number" },
+        "defaultCpcUsd": { "type": "number" },
+        "frequencyCapPerSession": { "type": "number" }
+      },
+      "required": ["adsEnabled", "defaultCpmUsd", "defaultCpcUsd"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": { "$ref": "#/entities/User" }, "description": "User profiles" },
+    "/userSettings/{userId}": { "schema": { "$ref": "#/entities/UserSettings" }, "description": "Private user settings and PII" },
+    "/posts/{postId}": { "schema": { "$ref": "#/entities/Post" }, "description": "Feed posts" },
+    "/reels/{reelId}": { "schema": { "$ref": "#/entities/Reel" }, "description": "Vertical Reels videos" },
+    "/stories/{storyId}": { "schema": { "$ref": "#/entities/Story" }, "description": "24h user stories" },
+    "/savedPosts/{saveId}": { "schema": { "$ref": "#/entities/SavedItem" }, "description": "Private saved posts, photos, videos, and reels" },
+    "/savedVideos/{saveId}": { "schema": { "$ref": "#/entities/SavedItem" }, "description": "Private saved video and reel index" },
+    "/recentSearches/{searchId}": { "schema": { "$ref": "#/entities/RecentSearch" }, "description": "User search history" },
+    "/comments/{commentId}": { "schema": { "$ref": "#/entities/Comment" }, "description": "Post and Reel text comments" },
+    "/voiceComments/{voiceCommentId}": { "schema": { "$ref": "#/entities/VoiceComment" }, "description": "Voice comments" },
+    "/conversations/{conversationId}": { "schema": { "$ref": "#/entities/Conversation" }, "description": "Messenger conversations" },
+    "/messages/{messageId}": { "schema": { "$ref": "#/entities/Message" }, "description": "Messenger messages" },
+    "/friendRequests/{requestId}": { "schema": { "$ref": "#/entities/FriendRequest" }, "description": "Two-way friend requests" },
+    "/friendships/{pairId}": { "schema": { "$ref": "#/entities/Friendship" }, "description": "Confirmed friendships" },
+    "/followRequests/{requestId}": { "schema": { "$ref": "#/entities/FollowRequest" }, "description": "Follow approval requests" },
+    "/userRestrictions/{restrictId}": { "schema": { "$ref": "#/entities/UserRestriction" }, "description": "Private account restrictions" },
+    "/verificationRequests/{requestId}": { "schema": { "$ref": "#/entities/VerificationRequest" }, "description": "Profile verification applications" },
+    "/profileViews/{viewId}": { "schema": { "$ref": "#/entities/ProfileView" }, "description": "Owner-only profile analytics views" },
+    "/communities/{communityId}": { "schema": { "$ref": "#/entities/Community" }, "description": "BANA Communities" },
+    "/communities/{communityId}/posts/{postId}": { "schema": { "$ref": "#/entities/CommunityPost" }, "description": "Community group posts, polls, and announcements" },
+    "/communityRequests/{requestId}": { "schema": { "$ref": "#/entities/CommunityRequest" }, "description": "Community join requests and invites" },
+    "/events/{eventId}": { "schema": { "$ref": "#/entities/Event" }, "description": "Local and community events" },
+    "/eventRegistrations/{regId}": { "schema": { "$ref": "#/entities/EventRegistration" }, "description": "Event RSVPs" },
+    "/marketplaceListings/{listingId}": { "schema": { "$ref": "#/entities/MarketplaceListing" }, "description": "BANA Marketplace products" },
+    "/productCategories/{categoryId}": { "schema": { "$ref": "#/entities/ProductCategory" }, "description": "Dynamic marketplace categories" },
+    "/stores/{storeId}": { "schema": { "$ref": "#/entities/SellerStore" }, "description": "Marketplace seller storefronts" },
+    "/shoppingCarts/{userId}": { "schema": { "$ref": "#/entities/ShoppingCart" }, "description": "User shopping carts" },
+    "/wishlists/{wishlistId}": { "schema": { "$ref": "#/entities/WishlistItem" }, "description": "User marketplace wishlists" },
+    "/orders/{orderId}": { "schema": { "$ref": "#/entities/MarketplaceOrder" }, "description": "Marketplace orders" },
+    "/orderItems/{itemId}": { "schema": { "$ref": "#/entities/MarketplaceOrderItem" }, "description": "Marketplace order line items" },
+    "/payments/{paymentId}": { "schema": { "$ref": "#/entities/MarketplacePayment" }, "description": "Marketplace payment & refund records" },
+    "/productReviews/{reviewId}": { "schema": { "$ref": "#/entities/ProductReview" }, "description": "Verified purchase product reviews" },
+    "/marketplaceReports/{reportId}": { "schema": { "$ref": "#/entities/MarketplaceReport" }, "description": "Marketplace and community moderation reports" },
+    "/boostPackages/{packageId}": { "schema": { "$ref": "#/entities/BoostPackage" }, "description": "Listing & Boost packages" },
+    "/paymentRequests/{requestId}": { "schema": { "$ref": "#/entities/PaymentRequest" }, "description": "User boost/slot payment submissions" },
+    "/notifications/{notificationId}": { "schema": { "$ref": "#/entities/Notification" }, "description": "User notifications" },
+    "/creatorEligibility/{uid}": { "schema": { "$ref": "#/entities/CreatorEligibility" }, "description": "Creator monetization eligibility tracking" },
+    "/monetizationPolicies/{policyId}": { "schema": { "$ref": "#/entities/MonetizationPolicy" }, "description": "Creator monetization policy & revenue share" },
+    "/creatorApplications/{applicationId}": { "schema": { "$ref": "#/entities/CreatorApplication" }, "description": "Creator monetization applications" },
+    "/earningEvents/{eventId}": { "schema": { "$ref": "#/entities/EarningEvent" }, "description": "Qualified video view and earning events" },
+    "/creatorEarnings/{earningId}": { "schema": { "$ref": "#/entities/CreatorEarning" }, "description": "Creator earnings ledger" },
+    "/payoutRequests/{payoutId}": { "schema": { "$ref": "#/entities/PayoutRequest" }, "description": "Creator payout requests" },
+    "/creatorPayouts/{payoutId}": { "schema": { "$ref": "#/entities/PayoutRequest" }, "description": "Creator payout settlement records" },
+    "/financialTransactions/{txId}": { "schema": { "$ref": "#/entities/FinancialTransaction" }, "description": "Immutable financial transaction ledger" },
+    "/advertisers/{uid}": { "schema": { "$ref": "#/entities/AdvertiserAccount" }, "description": "Advertiser business & billing accounts" },
+    "/adCreatives/{creativeId}": { "schema": { "$ref": "#/entities/AdCreative" }, "description": "Ad creatives library" },
+    "/adCampaigns/{campaignId}": { "schema": { "$ref": "#/entities/AdCampaign" }, "description": "Self-service advertising campaigns" },
+    "/adPayments/{paymentId}": { "schema": { "$ref": "#/entities/AdPayment" }, "description": "Advertiser billing payment records" },
+    "/advertisingSettings/{settingId}": { "schema": { "$ref": "#/entities/AdvertisingSettings" }, "description": "Global advertising delivery and policy settings" },
+    "/reports/{reportId}": { "schema": { "$ref": "#/entities/Report" }, "description": "Abuse and moderation reports" },
+    "/adminRoles/{userId}": { "schema": { "$ref": "#/entities/AdminRole" }, "description": "Admin RBAC assignments" },
+    "/auditLogs/{logId}": { "schema": { "$ref": "#/entities/AuditLog" }, "description": "Admin audit trail" }
+  }
+}

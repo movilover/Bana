@@ -1,0 +1,71 @@
+name: Deploy BANA site to GitHub Pages
+
+# Push this whole project folder to the `main` branch. GitHub builds the site and publishes it:
+#   User site : https://<name>.github.io/<repo>/
+#   Admin     : https://<name>.github.io/<repo>/admin   (same build, role-protected route)
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Work out the site base path
+        id: base
+        run: |
+          REPO="${GITHUB_REPOSITORY#*/}"
+          if [[ "$REPO" == *.github.io ]]; then echo "path=/" >> "$GITHUB_OUTPUT"; else echo "path=/${REPO}/" >> "$GITHUB_OUTPUT"; fi
+
+      - run: npm ci
+
+      - name: Build (Spark/free plan by default)
+        run: npm run build
+        env:
+          VITE_BASE_PATH: ${{ steps.base.outputs.path }}
+          # Change these in GitHub: Settings > Secrets and variables > Actions > Variables
+          VITE_FIREBASE_PLAN_MODE: ${{ vars.VITE_FIREBASE_PLAN_MODE || 'spark' }}
+          VITE_ENABLE_CLOUD_FUNCTIONS: ${{ vars.VITE_ENABLE_CLOUD_FUNCTIONS || 'false' }}
+          VITE_BACKEND_URL: ${{ vars.VITE_BACKEND_URL }}
+          VITE_MEDIA_BROKER_URL: ${{ vars.VITE_MEDIA_BROKER_URL }}
+          VITE_CALLING_PROVIDER: ${{ vars.VITE_CALLING_PROVIDER || 'webrtc_builtin' }}
+
+      - name: Single-page-app fallback for deep links and /admin
+        run: |
+          cp dist/index.html dist/404.html
+          touch dist/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

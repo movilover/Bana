@@ -1,0 +1,28 @@
+name = "bana-media-broker"
+main = "src/index.ts"
+compatibility_date = "2025-02-01"
+
+[vars]
+FIREBASE_PROJECT_ID = "bana-a5770"
+# Comma-separated list. ADD your GitHub Pages origin, e.g. https://YOURNAME.github.io (origin only, no path).
+ALLOWED_ORIGINS = "https://bana-a5770.web.app,https://bana-a5770.firebaseapp.com,http://localhost:3000"
+R2_REGION = "auto"
+B2_REGION = "us-west-004"
+GCS_REGION = "auto"
+SUPABASE_REGION = "us-east-1"
+GENERIC_S3_REGION = "us-east-1"
+
+# Scheduled backup/provider readiness check every 6 hours (Free Workers Cron Trigger)
+[triggers]
+crons = ["0 */6 * * *"]
+
+# DO NOT put R2/B2/S3 secret keys in this file!
+# Set secrets securely with:
+#   npx wrangler secret put R2_ACCESS_KEY_ID
+#   npx wrangler secret put R2_SECRET_ACCESS_KEY
+#   npx wrangler secret put R2_ENDPOINT
+#   npx wrangler secret put R2_BUCKET
+#   npx wrangler secret put B2_KEY_ID
+#   npx wrangler secret put B2_APPLICATION_KEY
+#   npx wrangler secret put B2_ENDPOINT
+#   npx wrangler secret put B2_BUCKET

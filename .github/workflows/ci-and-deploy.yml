@@ -1,0 +1,65 @@
+name: BANA CI, Tests & Deployment
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  verify-frontend-and-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: TypeScript check & Vite build
+        run: |
+          npm run lint
+          npm run build
+
+      - name: Install & build backend server
+        run: |
+          npm install --prefix backend --no-audit --no-fund --legacy-peer-deps
+          npm run --prefix backend build
+
+      - name: Run automated backend, WebRTC signaling & storage E2E tests
+        run: |
+          node tests/calling/backend-and-providers.test.mjs
+          node tests/storage/multi-provider-e2e.test.mjs
+
+      - name: Verify secret-free release archive build
+        run: npm run release:zip
+
+  deploy-firebase-hosting:
+    needs: verify-frontend-and-backend
+    if: github.ref == 'refs/heads/main' && vars.ENABLE_FIREBASE_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci && npm run build
+        env:
+          VITE_FIREBASE_PLAN_MODE: spark
+          VITE_ENABLE_CLOUD_FUNCTIONS: 'false'
+          VITE_BACKEND_URL: ${{ vars.VITE_BACKEND_URL }}
+          VITE_MEDIA_BROKER_URL: ${{ vars.VITE_MEDIA_BROKER_URL }}
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          channelId: live
+          projectId: bana-a5770

@@ -1,0 +1,21 @@
+{
+  "category": "realtime_messaging",
+  "providers": [
+    {
+      "id": "firestore_ws",
+      "name": "Cloud Firestore Realtime + Express /ws Bridge",
+      "tier": "free",
+      "requiresBillingApproval": false,
+      "features": ["direct_chat", "group_chat", "delivered_receipts", "read_receipts", "typing_indicators", "presence", "voice_notes", "media_attachments"],
+      "envVars": ["VITE_BACKEND_URL"]
+    },
+    {
+      "id": "supabase_realtime",
+      "name": "Supabase PostgreSQL + Realtime CDC",
+      "tier": "open_source",
+      "requiresBillingApproval": false,
+      "features": ["postgres_persistence", "rls_isolation", "realtime_broadcast", "delivered_receipts", "read_receipts"],
+      "envVars": ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_JWT_SECRET"]
+    }
+  ]
+}

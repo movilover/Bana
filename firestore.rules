@@ -1,0 +1,1822 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================
+    // Core Security Primitives
+    // =========================================================
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+    function isAccountStandingActive() {
+      return !exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('accountStatus', 'active') == 'active';
+    }
+    function isMessagingAllowed() {
+      return !exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('messagingRestricted', false) != true;
+    }
+    function isVerified() {
+      return isSignedIn()
+        && (
+          request.auth.token.email_verified == true ||
+          request.auth.token.firebase.sign_in_provider == 'google.com'
+        )
+        && isAccountStandingActive();
+    }
+    function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
+    function pairBlocked(a, b) {
+      return exists(/databases/$(database)/documents/userBlocks/$(a + '_' + b))
+        || exists(/databases/$(database)/documents/userBlocks/$(b + '_' + a));
+    }
+    function friendshipPairId(a, b) { return a < b ? a + '_' + b : b + '_' + a; }
+    function areFriends(a, b) {
+      return exists(/databases/$(database)/documents/friendships/$(friendshipPairId(a, b)));
+    }
+    function canViewByVisibility(data) {
+      return data.visibility == 'public'
+        || (isSignedIn() && data.authorId == request.auth.uid)
+        || (isSignedIn() && data.visibility == 'followers'
+            && !pairBlocked(request.auth.uid, data.authorId)
+            && exists(/databases/$(database)/documents/userFollows/$(request.auth.uid + '_' + data.authorId)))
+        || (isSignedIn() && data.visibility == 'friends'
+            && !pairBlocked(request.auth.uid, data.authorId)
+            && areFriends(request.auth.uid, data.authorId));
+    }
+    function isValidId(id) { return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-:.]+$'); }
+    function isValidString(val, min, max) { return val is string && val.size() >= min && val.size() <= max; }
+
+    // SECURITY (H3): the bootstrap Super Admin e-mail can be switched off once real adminRoles exist.
+    // To retire it: create adminRoles/<your uid> with role 'super_admin' FIRST, then create
+    // adminBootstrap/state with { disabled: true }. Until that doc exists the bootstrap stays active.
+    function bootstrapEnabled() {
+      return !(exists(/databases/$(database)/documents/adminBootstrap/state)
+        && get(/databases/$(database)/documents/adminBootstrap/state).data.get('disabled', false) == true);
+    }
+
+    function isBootstrappedSuperAdmin() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email == 'omor.faruk.sojol.2@gmail.com'
+        && bootstrapEnabled();
+    }
+
+    function hasAdminClaim() {
+      return isSignedIn()
+        && request.auth.token.adminRole is string
+        && request.auth.token.adminRole in [
+          'super_admin', 'admin', 'moderator', 'support_staff',
+          'finance_manager', 'ad_manager', 'content_manager', 'support_manager'
+        ];
+    }
+
+    function hasAdminDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/adminRoles/$(request.auth.uid));
+    }
+
+    function getAdminDocRole() {
+      return get(/databases/$(database)/documents/adminRoles/$(request.auth.uid)).data.role;
+    }
+
+    function hasRole(roleName) {
+      return (hasAdminClaim() && request.auth.token.adminRole == roleName)
+        || (hasAdminDoc() && getAdminDocRole() == roleName);
+    }
+
+    function isAdmin() {
+      return isBootstrappedSuperAdmin() || hasAdminClaim() || hasAdminDoc();
+    }
+
+    function isSuperAdmin() {
+      return isBootstrappedSuperAdmin() || hasRole('super_admin');
+    }
+
+    function isFullAdmin() {
+      return isSuperAdmin() || hasRole('admin');
+    }
+
+    function isFinanceAdmin() {
+      return isSuperAdmin() || hasRole('finance_manager');
+    }
+
+    function isAdAdmin() {
+      return isFullAdmin() || hasRole('ad_manager') || hasRole('content_manager');
+    }
+
+    function isSupportAdmin() {
+      return isFullAdmin() || hasRole('moderator') || hasRole('support_staff') || hasRole('support_manager');
+    }
+
+    function isModAdmin() {
+      return isFullAdmin() || hasRole('moderator') || hasRole('content_manager') || hasRole('support_manager');
+    }
+
+    // Prompt 09: field-scoped staff writes on public user profiles.
+    // Each staff family may touch ONLY the fields its job requires (no blanket profile edits).
+    function canManageUserStanding() {
+      return isFullAdmin() || hasRole('moderator');
+    }
+    function canReviewVerification() {
+      return isFullAdmin() || hasRole('moderator') || hasRole('support_staff') || hasRole('support_manager');
+    }
+    function canManageCreatorFlags() {
+      return isFullAdmin() || hasRole('finance_manager');
+    }
+    function isScopedStaffUserUpdate() {
+      return (canManageUserStanding()
+          && incoming().diff(existing()).affectedKeys().hasOnly(['accountStatus', 'accountRestrictionNote', 'messagingRestricted', 'updatedAt']))
+        || (canReviewVerification()
+          && incoming().diff(existing()).affectedKeys().hasOnly(['isVerified', 'verificationType', 'updatedAt']))
+        || (canManageCreatorFlags()
+          && incoming().diff(existing()).affectedKeys().hasOnly(['isCreator', 'paidListingQuota', 'updatedAt']));
+    }
+
+    // =========================================================
+    // Users (Public Profiles - No PII stored here)
+    // =========================================================
+    function isValidUserCreate(data) {
+      return data.keys().hasAll(['uid', 'username', 'displayName', 'isVerified', 'isCreator', 'accountStatus', 'followersCount', 'followingCount', 'createdAt'])
+        && data.uid == request.auth.uid
+        && isValidString(data.username, 3, 30)
+        && data.username.matches('^[a-z0-9_\\.]+$')
+        && isValidString(data.displayName, 1, 80)
+        && data.isVerified == false
+        && data.isCreator == false
+        && data.accountStatus == 'active'
+        && data.followersCount == 0
+        && data.followingCount == 0
+        && data.createdAt == request.time;
+    }
+
+    match /users/{userId} {
+      allow get, list: if true;
+      allow create: if isSignedIn() && isValidId(userId) && isOwner(userId) && isValidUserCreate(incoming());
+      allow update: if isSignedIn() && isValidId(userId) && (
+        isScopedStaffUserUpdate() || (
+          isOwner(userId)
+          && incoming().uid == existing().uid
+          && incoming().isVerified == existing().isVerified
+          && incoming().isCreator == existing().isCreator
+          && incoming().accountStatus == existing().accountStatus
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'displayName',
+            'username',
+            'bio',
+            'avatarUrl',
+            'coverUrl',
+            'location',
+            'website',
+            'interests',
+            'creatorCategory',
+            'onboardingCompleted',
+            'isPrivateAccount',
+            'whoCanFollow',
+            'whoCanFriendRequest',
+            'whoCanMessage',
+            'whoCanCall',
+            'whoCanViewFriends',
+            'whoCanViewFollowers',
+            'showOnlineStatus',
+            'showPersonalInfo',
+            'showLocation',
+            'profileLayout',
+            'profileAccent',
+            'pinnedPostId',
+            'featuredPostIds',
+            'highlights',
+            'lastActiveAt',
+            'updatedAt'
+          ])
+          && isValidString(incoming().displayName, 1, 80)
+          && isValidString(incoming().username, 3, 30)
+          && incoming().username.matches('^[a-z0-9_\\.]+$')
+          && incoming().updatedAt == request.time
+        )
+      );
+      allow delete: if isSuperAdmin() || (isSignedIn() && isOwner(userId)); // owner may erase own profile (account deletion)
+    }
+
+    // Global Username Uniqueness Reservation
+    match /usernames/{username} {
+      allow get, list: if true;
+      allow create: if isSignedIn()
+        && isValidString(username, 3, 30)
+        && username.matches('^[a-z0-9_\\.]+$')
+        && !exists(/databases/$(database)/documents/usernames/$(username))
+        && incoming().uid == request.auth.uid
+        && incoming().username == username
+        && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isSignedIn() && (existing().uid == request.auth.uid || isSuperAdmin());
+    }
+
+    // =========================================================
+    // User Settings (Private PII & Preferences)
+    // =========================================================
+    match /userSettings/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update: if isOwner(userId) && isValidId(userId)
+        && incoming().uid == request.auth.uid
+        && incoming().themeMode in ['light', 'dark', 'system']
+        && incoming().messengerTheme in ['light', 'dark', 'match']
+        && incoming().updatedAt == request.time;
+      allow delete: if isOwner(userId) || isSuperAdmin();
+    }
+
+    // =========================================================
+    // Follows, Follow Requests, Friend Requests, Friendships, Blocks & Restrictions
+    // =========================================================
+    match /userFollows/{followId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(followId)
+        && isValidId(incoming().followerId)
+        && isValidId(incoming().followingId)
+        && followId == incoming().followerId + '_' + incoming().followingId
+        && incoming().followingId != incoming().followerId
+        && !exists(/databases/$(database)/documents/userBlocks/$(incoming().followingId + '_' + incoming().followerId))
+        && !exists(/databases/$(database)/documents/userBlocks/$(incoming().followerId + '_' + incoming().followingId))
+        && (
+          (
+            incoming().followerId == request.auth.uid
+            && get(/databases/$(database)/documents/users/$(incoming().followingId)).data.get('isPrivateAccount', false) != true
+            && get(/databases/$(database)/documents/users/$(incoming().followingId)).data.get('whoCanFollow', 'everyone') != 'approval'
+          )
+          || (
+            incoming().followingId == request.auth.uid
+            && exists(/databases/$(database)/documents/followRequests/$(incoming().followerId + '_' + request.auth.uid))
+          )
+        )
+        && incoming().createdAt == request.time;
+      allow delete: if isSignedIn() && (
+        existing().followerId == request.auth.uid ||
+        existing().followingId == request.auth.uid
+      );
+    }
+
+    match /followRequests/{requestId} {
+      allow get: if isSignedIn() && (
+        resource == null ||
+        existing().fromUid == request.auth.uid ||
+        existing().toUid == request.auth.uid
+      );
+      allow list: if isSignedIn() && (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(requestId)
+        && incoming().fromUid == request.auth.uid
+        && isValidId(incoming().toUid)
+        && requestId == request.auth.uid + '_' + incoming().toUid
+        && incoming().toUid != request.auth.uid
+        && incoming().status == 'pending'
+        && !exists(/databases/$(database)/documents/userBlocks/$(incoming().toUid + '_' + request.auth.uid))
+        && !exists(/databases/$(database)/documents/userBlocks/$(request.auth.uid + '_' + incoming().toUid))
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn()
+        && existing().toUid == request.auth.uid
+        && incoming().fromUid == existing().fromUid
+        && incoming().toUid == existing().toUid
+        && incoming().status in ['accepted', 'declined']
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+      allow delete: if isSignedIn() && (existing().fromUid == request.auth.uid || existing().toUid == request.auth.uid);
+    }
+
+    match /friendRequests/{requestId} {
+      allow get: if isSignedIn() && (
+        resource == null ||
+        existing().fromUid == request.auth.uid ||
+        existing().toUid == request.auth.uid
+      );
+      allow list: if isSignedIn() && (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(requestId)
+        && incoming().fromUid == request.auth.uid
+        && isValidId(incoming().toUid)
+        && requestId == request.auth.uid + '_' + incoming().toUid
+        && incoming().toUid != request.auth.uid
+        && incoming().status == 'pending'
+        && !exists(/databases/$(database)/documents/userBlocks/$(incoming().toUid + '_' + request.auth.uid))
+        && !exists(/databases/$(database)/documents/userBlocks/$(request.auth.uid + '_' + incoming().toUid))
+        && !areFriends(request.auth.uid, incoming().toUid)
+        && get(/databases/$(database)/documents/users/$(incoming().toUid)).data.get('whoCanFriendRequest', 'everyone') != 'nobody'
+        && (
+          get(/databases/$(database)/documents/users/$(incoming().toUid)).data.get('whoCanFriendRequest', 'everyone') != 'followers'
+          || exists(/databases/$(database)/documents/userFollows/$(incoming().toUid + '_' + request.auth.uid))
+        )
+        && incoming().createdAt == request.time;
+      // Only the recipient may accept/decline. The sender can never accept their own request.
+      allow update: if isSignedIn()
+        && existing().toUid == request.auth.uid
+        && incoming().fromUid == existing().fromUid
+        && incoming().toUid == existing().toUid
+        && incoming().status in ['accepted', 'declined']
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+      allow delete: if isSignedIn() && (existing().fromUid == request.auth.uid || existing().toUid == request.auth.uid);
+    }
+
+    match /friendships/{pairId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(pairId)
+        && incoming().participants is list
+        && incoming().participants.size() == 2
+        && request.auth.uid in incoming().participants
+        && incoming().participants[0] < incoming().participants[1]
+        && pairId == incoming().participants[0] + '_' + incoming().participants[1]
+        && !pairBlocked(incoming().participants[0], incoming().participants[1])
+        && (
+          (exists(/databases/$(database)/documents/friendRequests/$(incoming().participants[0] + '_' + incoming().participants[1]))
+            && get(/databases/$(database)/documents/friendRequests/$(incoming().participants[0] + '_' + incoming().participants[1])).data.status == 'accepted')
+          ||
+          (exists(/databases/$(database)/documents/friendRequests/$(incoming().participants[1] + '_' + incoming().participants[0]))
+            && get(/databases/$(database)/documents/friendRequests/$(incoming().participants[1] + '_' + incoming().participants[0])).data.status == 'accepted')
+        )
+        && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isSignedIn() && request.auth.uid in existing().participants;
+    }
+
+    match /userBlocks/{blockId} {
+      allow get: if isSignedIn() && (
+        resource == null ||
+        existing().blockerId == request.auth.uid ||
+        existing().blockedUid == request.auth.uid
+      );
+      allow list: if isSignedIn() && resource.data.blockerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(blockId)
+        && incoming().blockerId == request.auth.uid
+        && isValidId(incoming().blockedUid)
+        && incoming().blockedUid != request.auth.uid
+        && blockId == request.auth.uid + '_' + incoming().blockedUid
+        && incoming().createdAt == request.time;
+      allow delete: if isSignedIn() && existing().blockerId == request.auth.uid;
+    }
+
+    match /userRestrictions/{restrictId} {
+      allow get: if isSignedIn() && (
+        resource == null ||
+        existing().restrictorId == request.auth.uid ||
+        existing().restrictedUid == request.auth.uid
+      );
+      allow list: if isSignedIn() && resource.data.restrictorId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(restrictId)
+        && incoming().restrictorId == request.auth.uid
+        && isValidId(incoming().restrictedUid)
+        && incoming().restrictedUid != request.auth.uid
+        && incoming().createdAt == request.time;
+      allow delete: if isSignedIn() && existing().restrictorId == request.auth.uid;
+    }
+
+    match /userMutes/{muteId} {
+      allow get: if isSignedIn() && (resource == null || existing().muterId == request.auth.uid);
+      allow list: if isSignedIn() && resource.data.muterId == request.auth.uid;
+      allow create: if isSignedIn() && incoming().muterId == request.auth.uid && incoming().createdAt == request.time;
+      allow delete: if isSignedIn() && existing().muterId == request.auth.uid;
+    }
+
+    // =========================================================
+    // Posts, Likes, Saved Posts, Comments & Voice Comments
+    // =========================================================
+    function isValidPostCreate(data) {
+      return data.keys().hasAll(['authorId', 'type', 'visibility', 'status', 'likesCount', 'commentsCount', 'sharesCount', 'createdAt'])
+        && data.authorId == request.auth.uid
+        && data.type in ['text', 'image', 'gallery', 'video', 'voice', 'poll', 'shared']
+        && data.visibility in ['public', 'followers', 'friends', 'only_me']
+        && data.status in ['published', 'draft']
+        && data.likesCount == 0
+        && data.commentsCount == 0
+        && data.sharesCount == 0
+        && data.createdAt == request.time;
+    }
+
+    match /posts/{postId} {
+      allow get: if canViewByVisibility(resource.data) || isAdmin();
+      allow list: if canViewByVisibility(resource.data) || isAdmin();
+      allow create: if isVerified() && isValidId(postId) && isValidPostCreate(incoming());
+      allow update: if isSignedIn() && isValidId(postId) && (
+        isModAdmin() || (
+          existing().authorId == request.auth.uid
+          && incoming().authorId == existing().authorId
+          && incoming().diff(existing()).affectedKeys().hasOnly(['content', 'visibility', 'status', 'hashtags', 'locationName', 'category', 'updatedAt'])
+          && incoming().updatedAt == request.time
+        ) || (
+          // Poll voting update
+          isAccountStandingActive()
+          && existing().type == 'poll'
+          && incoming().authorId == existing().authorId
+          && incoming().pollVoters is map
+          && incoming().pollOptions is list
+          && incoming().diff(existing()).affectedKeys().hasOnly(['pollOptions', 'pollVoters', 'updatedAt'])
+          // A voter may only add their own single vote, once, and may not add/remove poll options.
+          && incoming().pollOptions.size() == existing().pollOptions.size()
+          && !(request.auth.uid in existing().get('pollVoters', {}))
+          && incoming().pollVoters.diff(existing().get('pollVoters', {})).affectedKeys().hasOnly([request.auth.uid])
+        )
+      );
+      allow delete: if isSignedIn() && (existing().authorId == request.auth.uid || isModAdmin());
+    }
+
+    match /postLikes/{likeId} {
+      allow get, list: if true;
+      allow create, update: if isSignedIn() && isAccountStandingActive() && isValidId(likeId)
+        && incoming().userId == request.auth.uid
+        && incoming().targetType in ['post', 'reel', 'story']
+        && isValidId(incoming().targetId)
+        && incoming().createdAt == request.time;
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    match /savedPosts/{saveId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isAccountStandingActive() && isValidId(saveId)
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && existing().userId == request.auth.uid
+        && incoming().userId == existing().userId
+        && incoming().diff(existing()).affectedKeys().hasOnly(['collectionName', 'updatedAt']);
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    match /savedVideos/{saveId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isAccountStandingActive() && isValidId(saveId)
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && existing().userId == request.auth.uid
+        && incoming().userId == existing().userId
+        && incoming().diff(existing()).affectedKeys().hasOnly(['collectionName', 'updatedAt']);
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    match /recentSearches/{searchId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(searchId)
+        && incoming().userId == request.auth.uid
+        && isValidString(incoming().query, 1, 120)
+        && incoming().createdAt == request.time;
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    match /comments/{commentId} {
+      allow get, list: if true;
+      allow create: if isVerified() && isValidId(commentId)
+        && incoming().authorId == request.auth.uid
+        && incoming().targetType in ['post', 'reel']
+        && isValidId(incoming().targetId)
+        && isValidString(incoming().content, 1, 1500)
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && (
+        isModAdmin() || (
+          existing().authorId == request.auth.uid
+          && incoming().authorId == existing().authorId
+          && incoming().targetId == existing().targetId
+          && incoming().deletionStatus == 'soft_deleted'
+          && incoming().deletedBy == request.auth.uid
+          && incoming().deletedAt == request.time
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['deletionStatus', 'deletedBy', 'deletedAt', 'updatedAt'])
+        ) || (
+          incoming().diff(existing()).affectedKeys().hasOnly(['likesCount'])
+          && incoming().likesCount is number
+          && incoming().likesCount >= 0
+          && (
+            incoming().likesCount == (existing().likesCount is number ? existing().likesCount : 0) + 1 ||
+            incoming().likesCount == (existing().likesCount is number ? existing().likesCount : 0) - 1
+          )
+        )
+      );
+      allow delete: if isModAdmin();
+    }
+
+    match /commentLikes/{likeId} {
+      allow get, list: if true;
+      allow create: if isSignedIn() && isAccountStandingActive() && isValidId(likeId)
+        && incoming().userId == request.auth.uid
+        && isValidId(incoming().commentId)
+        && incoming().createdAt == request.time;
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    match /voiceComments/{voiceId} {
+      allow get, list: if true;
+      allow create: if isVerified() && isValidId(voiceId)
+        && incoming().authorId == request.auth.uid
+        && incoming().targetType in ['post', 'reel']
+        && isValidId(incoming().targetId)
+        && isValidString(incoming().audioUrl, 10, 1000)
+        && incoming().durationSeconds is number && incoming().durationSeconds > 0 && incoming().durationSeconds <= 180
+        && incoming().createdAt == request.time;
+      allow delete: if isSignedIn() && (existing().authorId == request.auth.uid || isModAdmin());
+    }
+
+    // =========================================================
+    // Reels & Stories
+    // =========================================================
+    match /reels/{reelId} {
+      allow get: if (resource.data.status == 'active' && resource.data.visibility == 'public')
+        || (isSignedIn() && resource.data.authorId == request.auth.uid)
+        || isModAdmin();
+      allow list: if (resource.data.status == 'active' && resource.data.visibility == 'public')
+        || (isSignedIn() && resource.data.authorId == request.auth.uid)
+        || isModAdmin();
+      allow create: if isVerified() && isValidId(reelId)
+        && incoming().authorId == request.auth.uid
+        && isValidString(incoming().videoUrl, 10, 1000)
+        && incoming().visibility in ['public', 'followers', 'only_me']
+        && incoming().status in ['active', 'draft']
+        && incoming().likesCount == 0
+        && incoming().commentsCount == 0
+        && incoming().viewsCount == 0
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && (
+        isModAdmin() || (
+          existing().authorId == request.auth.uid
+          && existing().status != 'removed'
+          && incoming().authorId == existing().authorId
+          && incoming().status in ['active', 'draft']
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'caption', 'description', 'category', 'visibility', 'status', 'hashtags', 'soundName', 'thumbnailUrl', 'captionsVttUrl', 'updatedAt'])
+        )
+      );
+      allow delete: if isSignedIn() && (existing().authorId == request.auth.uid || isModAdmin());
+    }
+
+    match /reelViews/{viewId} {
+      allow get: if isSignedIn() && existing().viewerId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.viewerId == request.auth.uid;
+      allow create: if isSignedIn() && incoming().viewerId == request.auth.uid && incoming().createdAt == request.time;
+    }
+
+    match /stories/{storyId} {
+      allow get, list: if resource.data.visibility == 'public' || isSignedIn();
+      allow create: if isVerified() && isValidId(storyId)
+        && incoming().authorId == request.auth.uid
+        && incoming().mediaType in ['image', 'video', 'text']
+        && (incoming().mediaType == 'text' || isValidString(incoming().mediaUrl, 10, 1000))
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && (
+        isModAdmin() || (
+          existing().authorId == request.auth.uid
+          && incoming().authorId == existing().authorId
+          && incoming().status in ['active', 'removed', 'expired']
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+        ) || (
+          incoming().diff(existing()).affectedKeys().hasOnly(['viewsCount'])
+          && incoming().viewsCount is number
+          && incoming().viewsCount == existing().viewsCount + 1
+        ) || (
+          incoming().diff(existing()).affectedKeys().hasOnly(['repliesCount'])
+          && incoming().repliesCount is number
+          && incoming().repliesCount >= existing().get('repliesCount', 0)
+        )
+      );
+      allow delete: if isSignedIn() && (existing().authorId == request.auth.uid || isModAdmin());
+    }
+
+    match /storyViews/{viewId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn() && (resource.data.viewerId == request.auth.uid || resource.data.storyAuthorId == request.auth.uid);
+      allow create: if isSignedIn() && incoming().viewerId == request.auth.uid && incoming().createdAt == request.time;
+    }
+
+    match /storyReplies/{replyId} {
+      allow get: if isSignedIn() && (
+        resource == null ||
+        existing().senderId == request.auth.uid ||
+        existing().storyAuthorId == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.storyAuthorId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isVerified() && isValidId(replyId)
+        && incoming().senderId == request.auth.uid
+        && isValidId(incoming().storyId)
+        && isValidId(incoming().storyAuthorId)
+        && isValidString(incoming().message, 1, 500)
+        && incoming().createdAt == request.time;
+      allow delete: if isSignedIn() && (
+        existing().senderId == request.auth.uid ||
+        existing().storyAuthorId == request.auth.uid ||
+        isModAdmin()
+      );
+    }
+
+    match /storyBackups/{storyId} {
+      allow get: if isSignedIn() && (
+        resource == null ||
+        existing().authorId == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.authorId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isVerified() && isValidId(storyId)
+        && incoming().authorId == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && (
+        isAdmin() || (
+          existing().authorId == request.auth.uid
+          && incoming().authorId == existing().authorId
+          && incoming().diff(existing()).affectedKeys().hasOnly(['expiredFromFeed', 'deletedByOwnerAt', 'backupUrl', 'backupProvider', 'backupObjectKey', 'backupStatus', 'updatedAt'])
+        )
+      );
+      allow delete: if isFullAdmin();
+    }
+
+    // =========================================================
+    // Messenger (Strictly Participant-Isolated)
+    // =========================================================
+    function isConversationParticipant(convId) {
+      return isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds;
+    }
+
+    match /conversations/{conversationId} {
+      allow get: if isSignedIn() && request.auth.uid in existing().participantIds;
+      allow list: if isSignedIn() && request.auth.uid in resource.data.participantIds;
+      allow create: if isVerified() && isMessagingAllowed() && isValidId(conversationId)
+        && incoming().participantIds is list
+        && incoming().participantIds.size() >= 2
+        && incoming().participantIds.size() <= 50
+        && request.auth.uid in incoming().participantIds
+        && (
+          incoming().get('isGroup', false) == true
+          || incoming().participantIds.size() != 2
+          || !pairBlocked(incoming().participantIds[0], incoming().participantIds[1])
+        )
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && request.auth.uid in existing().participantIds && (
+        (
+          incoming().participantIds == existing().participantIds
+          && incoming().diff(existing()).affectedKeys().hasOnly(['lastMessageText', 'lastMessageSenderId', 'unreadCounts', 'typingUsers', 'mutedBy', 'archivedBy', 'isRequest', 'updatedAt'])
+        ) || (
+          // Group admin settings & membership management (admins only)
+          existing().isGroup == true
+          && existing().adminIds is list
+          && request.auth.uid in existing().adminIds
+          && incoming().participantIds is list
+          && incoming().participantIds.size() >= 1
+          && incoming().participantIds.size() <= 50
+          && incoming().diff(existing()).affectedKeys().hasOnly(['groupName', 'groupDescription', 'groupAvatar', 'adminIds', 'participantIds', 'participantMeta', 'updatedAt'])
+        ) || (
+          // Any member may leave a group conversation
+          existing().isGroup == true
+          && incoming().diff(existing()).affectedKeys().hasOnly(['participantIds', 'adminIds', 'updatedAt'])
+          && !(request.auth.uid in incoming().participantIds)
+          && incoming().participantIds.size() == existing().participantIds.size() - 1
+        )
+      );
+      allow delete: if false;
+    }
+
+    match /messages/{messageId} {
+      allow get: if isSignedIn() && isConversationParticipant(existing().conversationId);
+      allow list: if isSignedIn() && isConversationParticipant(resource.data.conversationId);
+      allow create: if isVerified() && isMessagingAllowed() && isValidId(messageId)
+        && incoming().senderId == request.auth.uid
+        && isConversationParticipant(incoming().conversationId)
+        && (
+          get(/databases/$(database)/documents/conversations/$(incoming().conversationId)).data.get('isGroup', false) == true
+          || get(/databases/$(database)/documents/conversations/$(incoming().conversationId)).data.participantIds.size() != 2
+          || !pairBlocked(
+               get(/databases/$(database)/documents/conversations/$(incoming().conversationId)).data.participantIds[0],
+               get(/databases/$(database)/documents/conversations/$(incoming().conversationId)).data.participantIds[1])
+        )
+        && incoming().type in ['text', 'image', 'video', 'voice', 'audio', 'file', 'shared_post', 'shared_reel']
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && isConversationParticipant(existing().conversationId) && (
+        (
+          existing().senderId == request.auth.uid
+          && incoming().diff(existing()).affectedKeys().hasOnly(['text', 'isEdited', 'updatedAt'])
+          && existing().type == 'text'
+          && existing().isDeleted == false
+          && request.time <= existing().createdAt + duration.value(15, 'm')
+        ) || (
+          existing().senderId == request.auth.uid
+          && incoming().diff(existing()).affectedKeys().hasOnly(['isDeleted', 'text', 'mediaUrl', 'updatedAt'])
+          && incoming().isDeleted == true
+        ) || (
+          incoming().diff(existing()).affectedKeys().hasOnly(['reactions', 'readBy', 'deliveredTo'])
+        )
+      );
+      allow delete: if false;
+    }
+
+    match /messageRequests/{reqId} {
+      allow get, list: if isSignedIn() && (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid);
+      allow create: if isVerified() && incoming().fromUid == request.auth.uid && incoming().status == 'pending' && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && existing().toUid == request.auth.uid && incoming().status in ['accepted', 'declined'];
+      allow delete: if isSignedIn() && (existing().fromUid == request.auth.uid || existing().toUid == request.auth.uid);
+    }
+
+    // =========================================================
+    // WebRTC Calling Signaling (Metadata & SDP/ICE Only)
+    // =========================================================
+    function isCallParticipant(callData) {
+      return isSignedIn() && (callData.callerId == request.auth.uid || callData.calleeId == request.auth.uid);
+    }
+
+    match /calls/{callId} {
+      allow get: if isCallParticipant(existing()) || isModAdmin();
+      allow list: if isCallParticipant(resource.data) || isModAdmin();
+      allow create: if isVerified() && isValidId(callId)
+        && incoming().callerId == request.auth.uid
+        && incoming().calleeId != request.auth.uid
+        && incoming().callType in ['audio', 'video']
+        && incoming().status == 'calling'
+        && incoming().createdAt == request.time;
+      allow update: if isCallParticipant(existing()) && (
+        (
+          incoming().callerId == existing().callerId
+          && incoming().calleeId == existing().calleeId
+          && incoming().status in ['calling', 'ringing', 'connected', 'reconnecting', 'on_hold', 'rejected', 'missed', 'ended', 'failed']
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'answer', 'screenSharingBy', 'endReason', 'durationSeconds', 'startedAt', 'endedAt', 'updatedAt'])
+        ) || (
+          // ICE restart SDP offer refresh by caller
+          existing().callerId == request.auth.uid
+          && incoming().callerId == existing().callerId
+          && incoming().calleeId == existing().calleeId
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'offer', 'updatedAt'])
+        ) || (
+          // Participant soft-deletes entry from their own call history
+          incoming().diff(existing()).affectedKeys().hasOnly(['hiddenBy'])
+        )
+      );
+      allow delete: if false;
+
+      match /candidates/{candidateId} {
+        allow get, list: if isCallParticipant(get(/databases/$(database)/documents/calls/$(callId)).data);
+        allow create: if isCallParticipant(get(/databases/$(database)/documents/calls/$(callId)).data)
+          && incoming().senderId == request.auth.uid
+          && incoming().candidate is string
+          && incoming().candidate.size() <= 2048
+          && incoming().createdAt == request.time;
+        allow update, delete: if false;
+      }
+    }
+
+    // Group Audio / Video Calling Rooms & Mesh Signaling
+    function isGroupCallMember(roomData) {
+      return isSignedIn() && (
+        request.auth.uid == roomData.hostId ||
+        request.auth.uid in roomData.invitedParticipantIds ||
+        request.auth.uid in roomData.activeParticipantIds ||
+        isConversationParticipant(roomData.conversationId)
+      );
+    }
+
+    match /groupCalls/{roomId} {
+      allow get: if isGroupCallMember(existing()) || isModAdmin();
+      allow list: if isGroupCallMember(resource.data) || isModAdmin();
+      allow create: if isVerified() && isValidId(roomId)
+        && incoming().hostId == request.auth.uid
+        && isConversationParticipant(incoming().conversationId)
+        && incoming().callType in ['audio', 'video']
+        && incoming().status == 'active'
+        && incoming().maxParticipants is number
+        && incoming().maxParticipants >= 2
+        && incoming().maxParticipants <= 50
+        && incoming().createdAt == request.time;
+      allow update: if isGroupCallMember(existing()) && (
+        (
+          incoming().hostId == existing().hostId
+          && incoming().conversationId == existing().conversationId
+          && incoming().diff(existing()).affectedKeys().hasOnly(['activeParticipantIds', 'status', 'endReason', 'endedAt', 'updatedAt'])
+        )
+      );
+      allow delete: if false;
+
+      match /participants/{participantUid} {
+        allow get, list: if isGroupCallMember(get(/databases/$(database)/documents/groupCalls/$(roomId)).data);
+        allow create: if isGroupCallMember(get(/databases/$(database)/documents/groupCalls/$(roomId)).data)
+          && participantUid == request.auth.uid
+          && incoming().uid == request.auth.uid;
+        allow update: if isGroupCallMember(get(/databases/$(database)/documents/groupCalls/$(roomId)).data) && (
+          participantUid == request.auth.uid ||
+          get(/databases/$(database)/documents/groupCalls/$(roomId)).data.hostId == request.auth.uid
+        );
+        allow delete: if isGroupCallMember(get(/databases/$(database)/documents/groupCalls/$(roomId)).data) && (
+          participantUid == request.auth.uid ||
+          get(/databases/$(database)/documents/groupCalls/$(roomId)).data.hostId == request.auth.uid
+        );
+      }
+
+      match /signals/{signalId} {
+        allow get, list: if isGroupCallMember(get(/databases/$(database)/documents/groupCalls/$(roomId)).data)
+          && (resource.data.toUid == request.auth.uid || resource.data.fromUid == request.auth.uid);
+        allow create: if isGroupCallMember(get(/databases/$(database)/documents/groupCalls/$(roomId)).data)
+          && incoming().fromUid == request.auth.uid
+          && incoming().kind in ['offer', 'answer', 'ice']
+          && incoming().createdAt == request.time;
+        allow delete: if isGroupCallMember(get(/databases/$(database)/documents/groupCalls/$(roomId)).data)
+          && (existing().toUid == request.auth.uid || existing().fromUid == request.auth.uid);
+      }
+    }
+
+    // Push Notification (FCM) device tokens
+    match /fcmTokens/{tokenId} {
+      allow get: if isSignedIn() && existing().uid == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow create, update: if isSignedIn() && incoming().uid == request.auth.uid;
+      allow delete: if isSignedIn() && existing().uid == request.auth.uid;
+    }
+
+    // =========================================================
+    // Communities, Roles, Requests, Group Posts & Events
+    // =========================================================
+    function isCommunityCreatorOrAdmin(communityId) {
+      return isSignedIn() && (
+        get(/databases/$(database)/documents/communities/$(communityId)).data.creatorId == request.auth.uid ||
+        (
+          exists(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)) &&
+          get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.status == 'active' &&
+          get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.role in ['owner', 'admin']
+        )
+      );
+    }
+
+    function isCommunityStaff(communityId) {
+      return isCommunityCreatorOrAdmin(communityId) || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)) &&
+        get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.status == 'active' &&
+        get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.role in ['owner', 'admin', 'moderator']
+      );
+    }
+
+    function isActiveCommunityMember(communityId) {
+      return isSignedIn() && (
+        get(/databases/$(database)/documents/communities/$(communityId)).data.creatorId == request.auth.uid ||
+        (
+          exists(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)) &&
+          get(/databases/$(database)/documents/communityMembers/$(communityId + '_' + request.auth.uid)).data.status == 'active'
+        )
+      );
+    }
+
+    match /communities/{communityId} {
+      allow get, list: if true;
+      allow create: if isVerified() && isValidId(communityId)
+        && incoming().creatorId == request.auth.uid
+        && isValidString(incoming().name, 2, 80)
+        && incoming().privacy in ['public', 'private']
+        && incoming().status == 'active'
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && (
+        isModAdmin() || (
+          isCommunityStaff(communityId)
+          && incoming().creatorId == existing().creatorId
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'description', 'coverUrl', 'avatarUrl', 'rules', 'announcement',
+            'pinnedPostId', 'chatConversationId', 'moderatorIds', 'restrictedUserIds',
+            'privacy', 'requiresApproval', 'district', 'membersCount', 'updatedAt'
+          ])
+        ) || (
+          incoming().diff(existing()).affectedKeys().hasOnly(['membersCount'])
+          && incoming().membersCount is number
+          && incoming().membersCount >= 0
+          && (incoming().membersCount == existing().membersCount + 1 || incoming().membersCount == existing().membersCount - 1)
+        ) || (
+          isActiveCommunityMember(communityId)
+          && incoming().diff(existing()).affectedKeys().hasOnly(['chatConversationId', 'updatedAt'])
+        )
+      );
+      allow delete: if isSuperAdmin() || (isSignedIn() && existing().creatorId == request.auth.uid);
+
+      match /posts/{postId} {
+        allow get, list: if get(/databases/$(database)/documents/communities/$(communityId)).data.privacy == 'public'
+          || isActiveCommunityMember(communityId)
+          || isModAdmin();
+        allow create: if isVerified() && isValidId(postId)
+          && isActiveCommunityMember(communityId)
+          && incoming().authorId == request.auth.uid
+          && incoming().communityId == communityId
+          && incoming().kind in ['post', 'announcement', 'poll']
+          // Announcements and pinned posts are staff-only (owner / admin / moderator).
+          && (incoming().kind != 'announcement' || isCommunityStaff(communityId))
+          && incoming().get('isPinned', false) == false
+          && incoming().status == 'active'
+          && incoming().createdAt == request.time;
+        allow update: if isSignedIn() && isValidId(postId) && (
+          isModAdmin()
+          || isCommunityStaff(communityId)
+          || (
+            existing().authorId == request.auth.uid
+            && incoming().authorId == existing().authorId
+            && incoming().diff(existing()).affectedKeys().hasOnly(['content', 'kind', 'status', 'updatedAt'])
+          )
+          || (
+            (get(/databases/$(database)/documents/communities/$(communityId)).data.privacy == 'public' || isActiveCommunityMember(communityId))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['likesUserIds', 'likesCount', 'pollOptions', 'pollVoters', 'commentsCount', 'updatedAt'])
+          )
+        );
+        allow delete: if isSignedIn() && (
+          existing().authorId == request.auth.uid ||
+          isCommunityStaff(communityId) ||
+          isModAdmin()
+        );
+
+        match /comments/{commentId} {
+          allow get, list: if get(/databases/$(database)/documents/communities/$(communityId)).data.privacy == 'public'
+            || isActiveCommunityMember(communityId)
+            || isModAdmin();
+          allow create: if isVerified() && isValidId(commentId)
+            && isActiveCommunityMember(communityId)
+            && incoming().authorId == request.auth.uid
+            && incoming().communityId == communityId
+            && incoming().postId == postId
+            && isValidString(incoming().content, 1, 1500)
+            && incoming().createdAt == request.time;
+          allow delete: if isSignedIn() && (
+            existing().authorId == request.auth.uid ||
+            isCommunityStaff(communityId) ||
+            isModAdmin()
+          );
+        }
+      }
+    }
+
+    match /communityMembers/{memberId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(memberId)
+        && incoming().status in ['active', 'pending']
+        && incoming().createdAt == request.time
+        && (
+          (
+            incoming().userId == request.auth.uid
+            && (
+              incoming().role == 'member' ||
+              (incoming().role in ['owner', 'admin'] && get(/databases/$(database)/documents/communities/$(incoming().communityId)).data.creatorId == request.auth.uid)
+            )
+          ) || (
+            isCommunityStaff(incoming().communityId)
+            && incoming().role == 'member'
+          )
+        );
+      allow update: if isSignedIn() && (
+        isModAdmin() ||
+        isCommunityCreatorOrAdmin(existing().communityId) || (
+          // Moderators can moderate member status only (cannot promote to owner/admin or reassign IDs)
+          isCommunityStaff(existing().communityId)
+          && incoming().communityId == existing().communityId
+          && incoming().userId == existing().userId
+          && incoming().role == existing().role
+          && incoming().status in ['active', 'muted', 'banned']
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+        )
+      );
+      allow delete: if isSignedIn() && (
+        existing().userId == request.auth.uid ||
+        isCommunityStaff(existing().communityId) ||
+        isModAdmin()
+      );
+    }
+
+    match /communityRequests/{requestId} {
+      allow get: if isSignedIn() && (
+        resource == null ||
+        existing().fromUid == request.auth.uid ||
+        existing().targetUid == request.auth.uid ||
+        isCommunityStaff(existing().communityId) ||
+        isModAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.fromUid == request.auth.uid ||
+        resource.data.targetUid == request.auth.uid ||
+        isModAdmin() ||
+        isCommunityStaff(resource.data.communityId)
+      );
+      allow create: if isSignedIn() && isValidId(requestId)
+        && incoming().fromUid == request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().requestType in ['join_request', 'invite']
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && (
+        existing().targetUid == request.auth.uid ||
+        isCommunityStaff(existing().communityId) ||
+        isModAdmin()
+      );
+      allow delete: if isSignedIn() && (
+        existing().fromUid == request.auth.uid ||
+        existing().targetUid == request.auth.uid ||
+        isCommunityStaff(existing().communityId) ||
+        isModAdmin()
+      );
+    }
+
+    // =========================================================
+    // Local & Community Events + Event Registrations (RSVP)
+    // =========================================================
+    match /events/{eventId} {
+      allow get, list: if true;
+      allow create: if isVerified() && isValidId(eventId)
+        && incoming().organizerId == request.auth.uid
+        && isValidString(incoming().title, 3, 120)
+        && incoming().attendeesCount == 0
+        && incoming().status == 'upcoming'
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && (
+        isModAdmin() ||
+        (existing().organizerId == request.auth.uid && incoming().organizerId == existing().organizerId) ||
+        (existing().get('communityId', '') != '' && isCommunityStaff(existing().communityId)) ||
+        (
+          // RSVP counters: active members only, each counter may move by at most 1 and never below 0.
+          isAccountStandingActive()
+          && incoming().diff(existing()).affectedKeys().hasOnly(['attendeesCount', 'interestedCount'])
+          && incoming().attendeesCount >= 0
+          && incoming().get('interestedCount', 0) >= 0
+          && incoming().attendeesCount - existing().attendeesCount in [-1, 0, 1]
+          && incoming().get('interestedCount', 0) - existing().get('interestedCount', 0) in [-1, 0, 1]
+        )
+      );
+      allow delete: if isSignedIn() && (
+        existing().organizerId == request.auth.uid ||
+        (existing().get('communityId', '') != '' && isCommunityStaff(existing().communityId)) ||
+        isModAdmin()
+      );
+    }
+
+    match /eventRegistrations/{regId} {
+      allow get: if isSignedIn() && (resource == null || existing().userId == request.auth.uid);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create, update: if isSignedIn() && isAccountStandingActive() && isValidId(regId)
+        && incoming().userId == request.auth.uid
+        && isValidId(incoming().eventId);
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    // =========================================================
+    // Marketplace Products, Categories, Stores, Cart, Wishlist, Orders, Payments & Reviews
+    // =========================================================
+    match /marketplaceListings/{listingId} {
+      allow get, list: if resource.data.status in ['active', 'out_of_stock', 'sold']
+        || (isSignedIn() && resource.data.sellerId == request.auth.uid)
+        || isModAdmin();
+      allow create: if isVerified() && isValidId(listingId)
+        && incoming().sellerId == request.auth.uid
+        && isValidString(incoming().title, 3, 120)
+        && incoming().price is number && incoming().price >= 0
+        && incoming().status in ['active', 'draft', 'pending_review']
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && (
+        isModAdmin() || (
+          existing().sellerId == request.auth.uid
+          && incoming().sellerId == existing().sellerId
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'description', 'price', 'currency', 'category', 'subcategory',
+            'condition', 'quantity', 'soldCount', 'deliveryOptions', 'deliveryFee', 'location',
+            'imageUrls', 'storeId', 'storeName', 'status', 'updatedAt'
+          ])
+          && incoming().get('soldCount', 0) >= 0
+          && incoming().status in ['active', 'draft', 'out_of_stock', 'sold', 'pending_review']
+        ) || (
+          isAccountStandingActive()
+          && incoming().diff(existing()).affectedKeys().hasOnly(['savesCount', 'viewsCount'])
+          && incoming().get('savesCount', 0) >= 0
+          && incoming().get('viewsCount', 0) >= 0
+        ) || (
+          isVerified()
+          && incoming().diff(existing()).affectedKeys().hasOnly(['quantity', 'soldCount', 'status', 'updatedAt'])
+          && incoming().quantity is number
+          && incoming().quantity >= 0
+          && incoming().quantity <= existing().get('quantity', 1)
+          && incoming().get('soldCount', 0) >= existing().get('soldCount', 0)
+          && incoming().status in [existing().status, 'out_of_stock']
+        ) || (
+          isVerified()
+          && incoming().diff(existing()).affectedKeys().hasOnly(['ratingAvg', 'reviewsCount', 'updatedAt'])
+          && incoming().ratingAvg is number
+          && incoming().ratingAvg >= 0
+          && incoming().ratingAvg <= 5
+          && incoming().reviewsCount is number
+          && incoming().reviewsCount >= existing().get('reviewsCount', 0)
+        )
+      );
+      allow delete: if isSignedIn() && (existing().sellerId == request.auth.uid || isModAdmin());
+    }
+
+    // =========================================================
+    // Notifications
+    // =========================================================
+    match /notifications/{notificationId} {
+      allow get: if isSignedIn() && existing().recipientId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.recipientId == request.auth.uid;
+      // Clients can trigger social notifications for other users only with actorId == auth.uid, or admins/functions
+      allow create: if isSignedIn() && (
+        (incoming().actorId == request.auth.uid && incoming().isRead == false && incoming().createdAt == request.time) ||
+        isAdmin()
+      );
+      allow update: if isSignedIn() && existing().recipientId == request.auth.uid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['isRead']);
+      allow delete: if isSignedIn() && existing().recipientId == request.auth.uid;
+    }
+
+    // =========================================================
+    // Monetization, Eligibility, Financial Ledger & Creator Payouts
+    // (Strict Server/Finance Admin Protection — Never allow client balance tampering)
+    // =========================================================
+    match /monetizationPolicies/{policyId} {
+      allow get, list: if true;
+      allow create, update, delete: if isSuperAdmin() || isFinanceAdmin();
+    }
+
+    match /creatorEligibility/{uid} {
+      allow get: if isOwner(uid) || isFinanceAdmin() || isAdmin();
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /creatorApplications/{applicationId} {
+      allow get: if isSignedIn() && (existing().uid == request.auth.uid || isFinanceAdmin() || isAdmin());
+      allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isVerified() && incoming().uid == request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().policiesAccepted == true
+        && incoming().originalContentAttested == true
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && (
+        isAdmin() || (
+          existing().uid == request.auth.uid
+          && (
+            (existing().status == 'rejected' && incoming().status == 'appealed') ||
+            (existing().status == 'needs_info' && incoming().status == 'pending')
+          )
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'appealNote', 'userResponseNote', 'payoutCategory', 'country', 'history', 'updatedAt'])
+        )
+      );
+      allow delete: if false;
+    }
+
+    match /earningEvents/{eventId} {
+      allow get: if isSignedIn() && (existing().uid == request.auth.uid || isFinanceAdmin() || isAdmin());
+      allow list: if isFinanceAdmin() || isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create, update, delete: if isFinanceAdmin();
+    }
+
+    match /creatorEarnings/{earningId} {
+      allow get: if isSignedIn() && (existing().uid == request.auth.uid || isFinanceAdmin() || isAdmin());
+      allow list: if isFinanceAdmin() || isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create, update, delete: if isFinanceAdmin();
+    }
+
+    match /creatorPayoutProfiles/{uid} {
+      allow get: if isOwner(uid) || isFinanceAdmin();
+      allow list: if isFinanceAdmin();
+      allow create, update: if (isOwner(uid) || isFinanceAdmin())
+        && incoming().uid == uid
+        && !incoming().keys().hasAny(['cardNumber', 'cvv', 'cardExpiry', 'pan'])
+        && incoming().updatedAt == request.time;
+      allow delete: if isOwner(uid) || isSuperAdmin();
+    }
+
+    match /payoutRequests/{payoutId} {
+      allow get: if isSignedIn() && (existing().uid == request.auth.uid || isFinanceAdmin() || isAdmin());
+      allow list: if isFinanceAdmin() || isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      // Created ONLY by the requestCreatorPayout Cloud Function (Admin SDK) after server-side balance validation.
+      allow create: if false;
+      allow update: if isFinanceAdmin();
+      allow delete: if false;
+    }
+
+    match /creatorPayouts/{payoutId} {
+      allow get: if isSignedIn() && (existing().uid == request.auth.uid || isFinanceAdmin() || isAdmin());
+      allow list: if isFinanceAdmin() || isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      // Created ONLY by the requestCreatorPayout Cloud Function (Admin SDK) after server-side balance validation.
+      allow create: if false;
+      allow update: if isFinanceAdmin();
+      allow delete: if false;
+    }
+
+    match /financialTransactions/{txId} {
+      allow get: if isSignedIn() && (existing().uid == request.auth.uid || isFinanceAdmin() || isAdmin());
+      allow list: if isFinanceAdmin() || isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      // Immutable ledger entries: clients can never edit or delete; Finance Admins may append audited entries when functions aren't called directly
+      allow create: if isFinanceAdmin() && incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    // =========================================================
+    // Boost Packages & Payment / Listing Approvals
+    // =========================================================
+    match /boostPackages/{packageId} {
+      allow get, list: if true;
+      allow create, update, delete: if isSuperAdmin() || isFinanceAdmin();
+    }
+
+    match /paymentRequests/{requestId} {
+      allow get: if isSignedIn() && (existing().uid == request.auth.uid || isFinanceAdmin() || isAdmin());
+      allow list: if isFinanceAdmin() || isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(requestId)
+        && incoming().uid == request.auth.uid
+        && incoming().status == 'pending'
+        && isValidString(incoming().transactionId, 3, 120)
+        && incoming().createdAt == request.time;
+      allow update: if isFinanceAdmin() || isAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    // =========================================================
+    // Self-Service Advertising, Creatives, Delivery & Billing
+    // =========================================================
+    match /advertisers/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isVerified() && isOwner(uid)
+        && incoming().uid == request.auth.uid
+        && incoming().status == 'active'
+        && incoming().walletBalanceUsd == 0
+        && incoming().lifetimeDepositUsd == 0
+        && incoming().lifetimeSpendUsd == 0
+        && incoming().verifiedAdvertiser == false
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && (
+        isAdmin() || (
+          isOwner(uid)
+          && incoming().uid == existing().uid
+          && incoming().status == existing().status
+          && incoming().walletBalanceUsd == existing().walletBalanceUsd
+          && incoming().lifetimeDepositUsd == existing().lifetimeDepositUsd
+          && incoming().lifetimeSpendUsd == existing().lifetimeSpendUsd
+          && incoming().verifiedAdvertiser == existing().verifiedAdvertiser
+          && incoming().diff(existing()).affectedKeys().hasOnly(['businessName', 'contactEmail', 'website', 'country', 'billingCurrency', 'updatedAt'])
+        )
+      );
+      allow delete: if isSuperAdmin();
+    }
+
+    match /advertiserAccounts/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isAdmin() || (
+        isVerified() && isOwner(uid)
+        && incoming().uid == request.auth.uid
+        && incoming().get('walletBalanceUsd', 0) == 0
+        && incoming().get('verifiedAdvertiser', false) == false
+        && incoming().get('status', 'active') == 'active'
+      );
+      allow update: if isAdmin() || (
+        isOwner(uid)
+        && incoming().uid == existing().uid
+        && incoming().get('walletBalanceUsd', 0) == existing().get('walletBalanceUsd', 0)
+        && incoming().get('verifiedAdvertiser', false) == existing().get('verifiedAdvertiser', false)
+        && incoming().get('status', 'active') == existing().get('status', 'active')
+        && incoming().diff(existing()).affectedKeys().hasOnly(['businessName', 'contactEmail', 'website', 'country', 'updatedAt'])
+      );
+    }
+
+    match /advertisingSettings/{settingId} {
+      allow get, list: if true;
+      allow create, update, delete: if isAdAdmin() || isFinanceAdmin();
+    }
+
+    match /adCreatives/{creativeId} {
+      allow get: if isAdmin() || (isSignedIn() && existing().advertiserId == request.auth.uid) || existing().approvalStatus == 'approved';
+      allow list: if isAdmin() || (isSignedIn() && resource.data.advertiserId == request.auth.uid) || resource.data.approvalStatus == 'approved';
+      allow create: if isVerified() && incoming().advertiserId == request.auth.uid
+        && incoming().approvalStatus == 'pending'
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && (
+        isAdAdmin() || (
+          existing().advertiserId == request.auth.uid
+          && incoming().advertiserId == existing().advertiserId
+          && incoming().approvalStatus == 'pending'
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'headline', 'bodyText', 'ctaLabel', 'mediaUrl', 'mediaType', 'destinationUrl', 'approvalStatus', 'updatedAt'])
+        )
+      );
+      allow delete: if isSignedIn() && ((existing().advertiserId == request.auth.uid && existing().approvalStatus != 'approved') || isFullAdmin());
+    }
+
+    match /adCampaigns/{campaignId} {
+      allow get: if existing().status == 'active'
+        || (isSignedIn() && (existing().advertiserId == request.auth.uid || isAdmin()));
+      allow list: if resource.data.status == 'active'
+        || isAdmin()
+        || (isSignedIn() && resource.data.advertiserId == request.auth.uid);
+      allow create: if isVerified() && incoming().advertiserId == request.auth.uid
+        && incoming().status in ['draft', 'pending_review']
+        && incoming().impressions == 0
+        && incoming().clicks == 0
+        && incoming().spentUsd == 0
+        && incoming().minorSafeAttested == true
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && (
+        isAdAdmin() || isFinanceAdmin() || (
+          existing().advertiserId == request.auth.uid
+          && incoming().advertiserId == existing().advertiserId
+          && incoming().impressions == existing().impressions
+          && incoming().clicks == existing().clicks
+          && incoming().spentUsd == existing().spentUsd
+          // Advertisers cannot self-approve unapproved ads or tamper with spend/metrics
+          && (
+            (existing().status in ['draft', 'rejected'] && incoming().status in ['draft', 'pending_review']) ||
+            (existing().status == 'active' && incoming().status in ['paused', 'terminated']) ||
+            (existing().status == 'paused' && incoming().status in ['active', 'terminated'])
+          )
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'campaignName', 'campaignType', 'objective', 'headline', 'bodyText', 'ctaLabel',
+            'creativeUrl', 'creativeType', 'creativeId', 'destinationUrl', 'placements',
+            'targeting', 'categoryTag', 'dailyBudgetUsd', 'totalBudgetUsd', 'startDate',
+            'endDate', 'status', 'terminatedAt', 'updatedAt'
+          ])
+        )
+      );
+      allow delete: if isSignedIn() && ((existing().advertiserId == request.auth.uid && existing().status == 'draft') || isSuperAdmin());
+    }
+
+    match /adImpressions/{impId} {
+      allow get, list: if isAdmin() || (isSignedIn() && resource.data.advertiserId == request.auth.uid);
+      allow create: if isSignedIn() && incoming().viewerId == request.auth.uid && incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /adClicks/{clickId} {
+      allow get, list: if isAdmin() || (isSignedIn() && resource.data.advertiserId == request.auth.uid);
+      allow create: if isSignedIn() && incoming().viewerId == request.auth.uid && incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /adPayments/{paymentId} {
+      allow get: if isSignedIn() && (existing().advertiserId == request.auth.uid || isFinanceAdmin() || isAdmin());
+      allow list: if isFinanceAdmin() || isAdmin() || (isSignedIn() && resource.data.advertiserId == request.auth.uid);
+      allow create: if isVerified() && isValidId(paymentId)
+        && incoming().advertiserId == request.auth.uid
+        && incoming().providerVerified == false
+        && incoming().status == 'awaiting_verification'
+        && incoming().amountUsd is number && incoming().amountUsd > 0
+        && !incoming().keys().hasAny(['cardNumber', 'cvv', 'cardExpiry'])
+        && incoming().createdAt == request.time;
+      allow update: if isFinanceAdmin();
+      allow delete: if false;
+    }
+
+    // =========================================================
+    // Safety Reports, Admin Settings, Admin Roles & Audit Logs
+    // =========================================================
+    match /reports/{reportId} {
+      allow get, list: if isModAdmin() || isSupportAdmin() || isAdAdmin() || (isSignedIn() && resource.data.reporterId == request.auth.uid);
+      allow create: if isSignedIn() && isAccountStandingActive() && incoming().reporterId == request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().createdAt == request.time
+        && isValidString(incoming().reason, 2, 120)
+        && (!('details' in incoming()) || (incoming().details is string && incoming().details.size() <= 500))
+        && (!('evidence' in incoming()) || (incoming().evidence is string && incoming().evidence.size() <= 500));
+      allow update: if isModAdmin() || isSupportAdmin() || isAdAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /adminSettings/{settingId} {
+      allow get, list: if true;
+      allow write: if isFullAdmin() || isFinanceAdmin();
+    }
+
+    // Bootstrap kill-switch document (see bootstrapEnabled()). Only a Super Admin may read or change it.
+    match /adminBootstrap/{docId} {
+      allow get, list: if isSuperAdmin();
+      allow create, update: if isSuperAdmin() && docId == 'state'
+        && incoming().keys().hasOnly(['disabled', 'updatedAt']) && incoming().disabled is bool;
+      allow delete: if false;
+    }
+
+    match /adminRoles/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      // Prompt 09: schema-locked role grants — only known roles, doc id == uid, no extra fields
+      // (a malformed doc could otherwise silently grant isAdmin() through hasAdminDoc()).
+      allow create, update: if isSuperAdmin()
+        && isValidId(userId)
+        && incoming().uid == userId
+        && incoming().role in ['super_admin', 'admin', 'moderator', 'support_staff', 'finance_manager', 'ad_manager', 'content_manager', 'support_manager']
+        && incoming().keys().hasOnly(['uid', 'email', 'role', 'assignedBy', 'createdAt', 'updatedAt'])
+        && incoming().assignedBy == request.auth.uid;
+      // A Super Admin can revoke others but never their own delegated role (prevents accidental lock-out).
+      allow delete: if isSuperAdmin() && userId != request.auth.uid;
+    }
+
+    match /auditLogs/{logId} {
+      allow get, list: if isAdmin();
+      // Append-only + schema-locked: no free-form blobs, no secrets, result is an enum.
+      allow create: if isAdmin() && incoming().actorUid == request.auth.uid && incoming().createdAt == request.time
+        && incoming().keys().hasAll(['actorUid', 'action', 'targetType', 'targetId', 'summary', 'createdAt'])
+        && incoming().keys().hasOnly(['actorUid', 'actorEmail', 'actorRole', 'action', 'targetType', 'targetId', 'summary', 'result', 'createdAt'])
+        && isValidString(incoming().action, 1, 80)
+        && isValidString(incoming().targetType, 1, 60)
+        && incoming().targetId is string && incoming().targetId.size() <= 200
+        && incoming().summary is string && incoming().summary.size() <= 500
+        && (!('actorEmail' in incoming()) || (incoming().actorEmail is string && incoming().actorEmail.size() <= 200))
+        && (!('actorRole' in incoming()) || (incoming().actorRole is string && incoming().actorRole.size() <= 40))
+        && (!('result' in incoming()) || incoming().result in ['success', 'failure', 'denied']);
+      allow update, delete: if false;
+    }
+
+    // Prompt 09: per-staff acknowledgement state for the Admin Alerts Center (dedupe of alerts)
+    match /adminAlertState/{staffUid} {
+      allow get: if isAdmin() && isOwner(staffUid);
+      allow create, update: if isAdmin() && isOwner(staffUid)
+        && incoming().keys().hasOnly(['uid', 'acknowledged', 'updatedAt'])
+        && incoming().uid == request.auth.uid
+        && incoming().acknowledged is map
+        && incoming().acknowledged.size() <= 40
+        && incoming().updatedAt == request.time;
+      allow list, delete: if false;
+    }
+
+    // =========================================================
+    // Profile Verification Requests & Deduplicated Profile Views
+    // =========================================================
+    match /verificationRequests/{requestId} {
+      allow get: if isSignedIn() && (
+        resource == null ||
+        existing().uid == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(requestId)
+        && incoming().uid == request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().type in ['identity', 'organization']
+        && isValidString(incoming().fullName, 2, 120)
+        && isValidString(incoming().category, 2, 60)
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && (
+        isModAdmin() || (isSupportAdmin() && incoming().status in ['needs_info', 'rejected']) || (
+          existing().uid == request.auth.uid
+          && existing().status in ['needs_info', 'rejected']
+          && incoming().uid == existing().uid
+          && incoming().status == 'pending'
+          && incoming().diff(existing()).affectedKeys().hasOnly(['type', 'fullName', 'category', 'reason', 'documentUrl', 'documentName', 'publicLinks', 'status', 'userResponseNote', 'history', 'updatedAt'])
+        )
+      );
+      allow delete: if isSuperAdmin();
+    }
+
+    match /profileViews/{viewId} {
+      allow get: if isSignedIn() && (
+        resource == null ||
+        existing().profileUid == request.auth.uid ||
+        existing().viewerUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (resource.data.profileUid == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && isValidId(viewId)
+        && incoming().viewerUid == request.auth.uid
+        && isValidId(incoming().profileUid)
+        && incoming().profileUid != request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    // =========================================================
+    // Phase 07: Categories, Stores, Carts, Wishlists, Orders, Payments, Reviews & Reports
+    // =========================================================
+    // Prompt 07: Seller applications. One document per applicant (id == uid).
+    // Applicants can only create a pending application and read their own; staff decide.
+    match /sellerApplications/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isVerified() && isAccountStandingActive() && isOwner(uid)
+        && incoming().uid == request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().acceptedSellerPolicy == true
+        && isValidString(incoming().storeName, 2, 80)
+        && isValidString(incoming().storeDescription, 10, 1000)
+        && incoming().createdAt == request.time;
+      // Re-apply after rejection only (back to pending); everything else is staff-only.
+      allow update: if isModAdmin() || isSuperAdmin() || (
+        isOwner(uid)
+        && existing().status == 'rejected'
+        && incoming().status == 'pending'
+        && incoming().uid == existing().uid
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'storeName', 'storeDescription', 'district', 'productCategories',
+          'contactPhone', 'contactEmail', 'businessType', 'acceptedSellerPolicy', 'displayName', 'username', 'updatedAt'
+        ])
+      );
+      allow delete: if false;
+    }
+
+    // Prompt 08: immutable history of monetization / advertising policy changes.
+    match /policyChangeHistory/{changeId} {
+      allow get, list: if isFinanceAdmin() || isAdAdmin() || isSuperAdmin();
+      allow create: if (isFinanceAdmin() || isAdAdmin() || isSuperAdmin())
+        && incoming().changedBy == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /productCategories/{categoryId} {
+      allow get, list: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /stores/{storeId} {
+      allow get, list: if true;
+      allow create: if isVerified() && isValidId(storeId)
+        && incoming().ownerId == request.auth.uid
+        && storeId == request.auth.uid
+        && isValidString(incoming().name, 2, 80)
+        && incoming().status == 'active'
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/sellerApplications/$(request.auth.uid))
+        && get(/databases/$(database)/documents/sellerApplications/$(request.auth.uid)).data.status == 'approved';
+      allow update: if isSignedIn() && isValidId(storeId) && (
+        isModAdmin() || (
+          existing().ownerId == request.auth.uid
+          && existing().status == 'active'
+          && incoming().ownerId == existing().ownerId
+          && incoming().status == existing().status
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'slug', 'description', 'logoUrl', 'coverUrl', 'district',
+            'contactPreference', 'contactPhone', 'contactEmail', 'updatedAt'
+          ])
+        ) || (
+          isVerified()
+          && incoming().diff(existing()).affectedKeys().hasOnly(['ratingAvg', 'reviewsCount', 'totalSales', 'updatedAt'])
+          && incoming().get('ratingAvg', 0) >= 0
+          && incoming().get('ratingAvg', 0) <= 5
+          && incoming().get('reviewsCount', 0) >= existing().get('reviewsCount', 0)
+          && incoming().get('totalSales', 0) >= existing().get('totalSales', 0)
+          // Spark-mode client fallback may only move counters one step at a time (bounds abuse; full
+          // enforcement requires the Cloud Functions path, see docs/PROMPT_07_08_REPORT.md).
+          && incoming().get('reviewsCount', 0) <= existing().get('reviewsCount', 0) + 1
+          && incoming().get('totalSales', 0) <= existing().get('totalSales', 0) + 1
+        )
+      );
+      allow delete: if isSuperAdmin();
+    }
+
+    match /shoppingCarts/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if false;
+      allow create, update: if isOwner(userId) && isValidId(userId)
+        && incoming().uid == request.auth.uid
+        && incoming().items is list
+        && incoming().items.size() <= 50
+        && incoming().updatedAt == request.time;
+      allow delete: if isOwner(userId);
+    }
+
+    match /wishlists/{wishlistId} {
+      allow get: if isSignedIn() && (resource == null || existing().userId == request.auth.uid);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isAccountStandingActive() && isValidId(wishlistId)
+        && incoming().userId == request.auth.uid
+        && isValidId(incoming().productId)
+        && incoming().createdAt == request.time;
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    match /orders/{orderId} {
+      allow get: if isSignedIn() && (
+        resource == null ||
+        existing().buyerId == request.auth.uid ||
+        existing().sellerId == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.buyerId == request.auth.uid ||
+        resource.data.sellerId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isVerified() && isValidId(orderId)
+        && incoming().buyerId == request.auth.uid
+        && incoming().sellerId != request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().paymentStatus in ['pending_cod', 'awaiting_verification']
+        && incoming().totalAmount is number && incoming().totalAmount >= 0
+        // Price-integrity hardening (Spark has no server-side order function): totals must add up, and the first
+        // line must match the live listing price. Full multi-line verification is done by createMarketplaceOrder on Blaze.
+        && incoming().itemsSnapshot is list && incoming().itemsSnapshot.size() >= 1 && incoming().itemsSnapshot.size() <= 50
+        && incoming().subtotal is number && incoming().deliveryFee is number && incoming().deliveryFee >= 0
+        && incoming().totalAmount == incoming().subtotal + incoming().deliveryFee
+        && incoming().itemsSnapshot[0].quantity is number && incoming().itemsSnapshot[0].quantity >= 1
+        && incoming().itemsSnapshot[0].unitPrice == get(/databases/$(database)/documents/marketplaceListings/$(incoming().itemsSnapshot[0].productId)).data.price
+        && (incoming().itemsSnapshot.size() > 1
+            || incoming().subtotal == incoming().itemsSnapshot[0].unitPrice * incoming().itemsSnapshot[0].quantity)
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && isValidId(orderId) && (
+        isFinanceAdmin() || (
+          existing().buyerId == request.auth.uid
+          && existing().status in ['pending', 'confirmed']
+          && incoming().status == 'cancelled'
+          && incoming().paymentStatus == existing().paymentStatus
+          && incoming().totalAmount == existing().totalAmount
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'cancelReason', 'updatedAt'])
+        ) || (
+          existing().sellerId == request.auth.uid
+          && incoming().buyerId == existing().buyerId
+          && incoming().sellerId == existing().sellerId
+          && incoming().totalAmount == existing().totalAmount
+          && incoming().paymentStatus == existing().paymentStatus
+          && incoming().status in ['confirmed', 'processing', 'shipped', 'delivered', 'cancelled']
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'sellerNote', 'trackingCode', 'cancelReason', 'updatedAt'])
+        )
+      );
+      allow delete: if false;
+    }
+
+    match /orderItems/{itemId} {
+      allow get: if isSignedIn() && (
+        existing().buyerId == request.auth.uid ||
+        existing().sellerId == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.buyerId == request.auth.uid ||
+        resource.data.sellerId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isVerified() && isValidId(itemId)
+        && incoming().buyerId == request.auth.uid
+        && incoming().quantity is number && incoming().quantity > 0
+        && incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /payments/{paymentId} {
+      allow get: if isSignedIn() && (
+        existing().buyerId == request.auth.uid ||
+        existing().sellerId == request.auth.uid ||
+        isFinanceAdmin() ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.buyerId == request.auth.uid ||
+        resource.data.sellerId == request.auth.uid ||
+        isFinanceAdmin() ||
+        isAdmin()
+      );
+      allow create: if isVerified() && isValidId(paymentId)
+        && incoming().buyerId == request.auth.uid
+        && incoming().providerVerified == false
+        && incoming().status in ['pending_cod', 'awaiting_verification']
+        && incoming().createdAt == request.time;
+      allow update: if isFinanceAdmin();
+      allow delete: if false;
+    }
+
+    match /productReviews/{reviewId} {
+      allow get, list: if true;
+      allow create: if isVerified() && isValidId(reviewId)
+        && incoming().reviewerId == request.auth.uid
+        && isValidId(incoming().orderId)
+        && isValidId(incoming().productId)
+        && incoming().rating is number && incoming().rating >= 1 && incoming().rating <= 5
+        && incoming().isVerifiedPurchase == true
+        && exists(/databases/$(database)/documents/orders/$(incoming().orderId))
+        && get(/databases/$(database)/documents/orders/$(incoming().orderId)).data.buyerId == request.auth.uid
+        && get(/databases/$(database)/documents/orders/$(incoming().orderId)).data.status == 'delivered'
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && (
+        isModAdmin() || (
+          incoming().diff(existing()).affectedKeys().hasOnly(['helpfulUserIds', 'helpfulCount', 'updatedAt'])
+          && incoming().helpfulUserIds is list
+          && incoming().helpfulCount is number && incoming().helpfulCount >= 0
+        )
+      );
+      allow delete: if isSignedIn() && (existing().reviewerId == request.auth.uid || isModAdmin());
+    }
+
+    match /marketplaceReports/{reportId} {
+      allow get, list: if isModAdmin() || isSupportAdmin() || (isSignedIn() && resource.data.reporterId == request.auth.uid);
+      allow create: if isSignedIn() && isAccountStandingActive() && isValidId(reportId)
+        && incoming().reporterId == request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().createdAt == request.time;
+      allow update: if isModAdmin() || isSupportAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    // =========================================================
+    // Phase 13: Multi-Cloud Storage, Backups, Retention & Disaster Recovery
+    // SECURITY INVARIANT: Never store API keys/secrets in storageProviders.
+    // =========================================================
+    function hasNoSecretFields(data) {
+      return !data.keys().hasAny(['secretAccessKey', 'accessKeyId', 'apiKey', 'privateKey', 'serviceAccountJson', 'token', 'password']);
+    }
+
+    match /storageProviders/{providerId} {
+      // Signed-in upload clients need non-secret active provider metadata (bucket/endpoint/workerBrokerUrl).
+      allow get, list: if isSignedIn();
+      allow create, update: if isFullAdmin() && isValidId(providerId) && hasNoSecretFields(incoming());
+      allow delete: if isSuperAdmin();
+    }
+
+    match /mediaAssets/{assetId} {
+      allow get: if isSignedIn() && (
+        resource == null ||
+        existing().ownerUid == request.auth.uid ||
+        isAdmin() ||
+        existing().mediaCategory in ['reel', 'post_video', 'image']
+      );
+      allow list: if isSignedIn() && (
+        resource.data.ownerUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isVerified() && isValidId(assetId)
+        && incoming().ownerUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && (
+        isAdmin() || (
+          existing().ownerUid == request.auth.uid
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'primaryUrl', 'sourceDocId', 'lifecycleStatus', 'backupProvider', 'backupObjectKey',
+            'backupStatus', 'errorMessage', 'integrityVerified', 'updatedAt'
+          ])
+        )
+      );
+      allow delete: if isFullAdmin();
+    }
+
+    match /backupJobs/{jobId} {
+      allow get: if isSignedIn() && (
+        resource == null ||
+        existing().ownerUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.ownerUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isVerified() && isValidId(jobId)
+        && (incoming().ownerUid == request.auth.uid || isAdmin())
+        && incoming().createdAt == request.time;
+      allow update: if isAdmin();
+      allow delete: if isFullAdmin();
+    }
+
+    match /retentionSettings/{settingId} {
+      allow get, list: if isSignedIn();
+      allow create, update: if isFullAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /backupAuditLogs/{logId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin() && incoming().actorUid == request.auth.uid && incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /recoveryOperations/{opId} {
+      allow get, list: if isAdmin();
+      allow create, update: if isAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /databaseSnapshots/{snapId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin() && incoming().exportedByUid == request.auth.uid && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isFullAdmin();
+    }
+
+    // =========================================================
+    // Admin API Provider Management (Zero Secret Keys Stored)
+    // =========================================================
+    // SECURITY (B1): paid providers (those needing billing approval) can only be approved by a Super Admin
+    // and can never be made the active provider unless that approval is already stored.
+    function paidApprovalAllowed(data) {
+      return data.get('requiresBillingApproval', false) != true
+        || data.get('billingApprovedByAdmin', false) != true
+        || isSuperAdmin()
+        || (resource != null && resource.data.get('billingApprovedByAdmin', false) == true);
+    }
+
+    function activeProviderIsApproved(data) {
+      return !(data.get('activeProviderKey', '') in ['agora', '100ms', 'gcs', 'cloudflare_stream'])
+        || (exists(/databases/$(database)/documents/apiProviders/$(data.activeProviderId))
+            && get(/databases/$(database)/documents/apiProviders/$(data.activeProviderId)).data.get('billingApprovedByAdmin', false) == true);
+    }
+
+    match /apiProviders/{providerId} {
+      allow get, list: if isSignedIn();
+      allow create, update: if isFullAdmin() && isValidId(providerId) && hasNoSecretFields(incoming()) && paidApprovalAllowed(incoming());
+      allow delete: if isSuperAdmin();
+    }
+
+    match /apiProviderActive/{categoryId} {
+      allow get, list: if isSignedIn();
+      allow create, update: if isFullAdmin() && isValidId(categoryId) && hasNoSecretFields(incoming()) && activeProviderIsApproved(incoming());
+      allow delete: if isSuperAdmin();
+    }
+
+    match /apiUsageRecords/{recordId} {
+      allow get, list: if isAdmin();
+      allow create, update: if isFullAdmin() && isValidId(recordId);
+      allow delete: if isSuperAdmin();
+    }
+
+    match /apiErrorLogs/{logId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin() && isValidId(logId);
+      allow update, delete: if isSuperAdmin();
+    }
+  }
+}

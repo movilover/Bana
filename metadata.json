@@ -1,0 +1,6 @@
+{
+  "name": "BANA",
+  "description": "Discover More. Connect Better. A next-generation social discovery platform with Smart Discovery, Reels, Messenger, Communities & Events, Marketplace, Creator Studio, and Admin Control.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

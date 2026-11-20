@@ -1,0 +1,29 @@
+{
+  "category": "push_notifications",
+  "providers": [
+    {
+      "id": "inapp_browser",
+      "name": "Firestore Real-Time Inbox + Web Notifications API",
+      "tier": "free",
+      "requiresBillingApproval": false,
+      "features": ["incoming_call_alerts", "unread_dm_alerts", "missed_call_alerts", "social_activity_alerts"],
+      "envVars": []
+    },
+    {
+      "id": "web_push_vapid",
+      "name": "Open-Standard Web Push (VAPID via backend/)",
+      "tier": "open_source",
+      "requiresBillingApproval": false,
+      "features": ["background_browser_push", "service_worker_wake"],
+      "envVars": ["VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT"]
+    },
+    {
+      "id": "fcm",
+      "name": "Firebase Cloud Messaging (FCM)",
+      "tier": "free",
+      "requiresBillingApproval": false,
+      "features": ["web_push", "mobile_push"],
+      "envVars": ["FIREBASE_PROJECT_ID", "GOOGLE_APPLICATION_CREDENTIALS"]
+    }
+  ]
+}
