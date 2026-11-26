@@ -1,51 +1,48 @@
-# Dependencies
-node_modules/
-backend/node_modules/
-functions/node_modules/
-workers/**/node_modules/
 
+!.env.example
+!backend/.env.example
+!workers/**/.dev.vars.example
 # Build output
-dist/
-build/
-coverage/
-backend/dist/
-functions/lib/
-workers/**/dist/
-*.tsbuildinfo
-
+# Dependencies
 # Environment & secrets (only *.example files are tracked)
+# Generated release archives
+# OS / editor
+# Tool caches / local state
+*.key
+*.log
+*.p12
+*.pem
+*.tsbuildinfo
+*.zip
+*firebase-adminsdk*.json
+*service-account*.json
+*serviceAccount*.json
+.DS_Store
+.aistudio/
+.dev.vars
 .env
 .env.*
-!.env.example
+.firebase/
+.idea/
+.vite/
+.vscode/
+.wrangler/
+Thumbs.db
+admin/node_modules/
 backend/.env
 backend/.env.*
-!backend/.env.example
-.dev.vars
-workers/**/.dev.vars
-!workers/**/.dev.vars.example
-*serviceAccount*.json
-*service-account*.json
-*firebase-adminsdk*.json
-*.pem
-*.key
-*.p12
-
-# Tool caches / local state
-.firebase/
-.wrangler/
-.aistudio/
-.vite/
-firebase-debug.log
+backend/dist/
+backend/node_modules/
+build/
+coverage/
+dist/
 firebase-debug.*.log
+firebase-debug.log
 firestore-debug.log
+functions/lib/
+functions/node_modules/
+node_modules/
 ui-debug.log
-
-# Generated release archives
-*.zip
-
-# OS / editor
-.DS_Store
-Thumbs.db
-.idea/
-.vscode/
-*.log
+workers/**/.dev.vars
+workers/**/dist/
+workers/**/node_modules/
