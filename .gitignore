@@ -1,48 +1,8 @@
-
-!.env.example
-!backend/.env.example
-!workers/**/.dev.vars.example
-# Build output
-# Dependencies
-# Environment & secrets (only *.example files are tracked)
-# Generated release archives
-# OS / editor
-# Tool caches / local state
-*.key
-*.log
-*.p12
-*.pem
-*.tsbuildinfo
-*.zip
-*firebase-adminsdk*.json
-*service-account*.json
-*serviceAccount*.json
-.DS_Store
-.aistudio/
-.dev.vars
+node_modules/
+admin/node_modules/
+backend/node_modules/
+dist/
+build/
 .env
 .env.*
-.firebase/
-.idea/
-.vite/
-.vscode/
-.wrangler/
-Thumbs.db
-admin/node_modules/
-backend/.env
-backend/.env.*
-backend/dist/
-backend/node_modules/
-build/
-coverage/
-dist/
-firebase-debug.*.log
-firebase-debug.log
-firestore-debug.log
-functions/lib/
-functions/node_modules/
-node_modules/
-ui-debug.log
-workers/**/.dev.vars
-workers/**/dist/
-workers/**/node_modules/
+!.env.example
