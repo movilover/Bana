@@ -1,0 +1,69 @@
+{
+  "categories": ["voice_video_calling", "group_calling", "screen_sharing"],
+  "providers": [
+    {
+      "id": "webrtc_builtin",
+      "name": "Built-in WebRTC + Public STUN / Self-Hosted Coturn TURN",
+      "categories": ["voice_video_calling", "group_calling", "screen_sharing"],
+      "tier": "free",
+      "requiresBillingApproval": false,
+      "capabilities": {
+        "audioCall": true,
+        "videoCall": true,
+        "groupMesh": true,
+        "recommendedMaxPeers": 8,
+        "screenShare": true,
+        "activeSpeakerDetection": true,
+        "requiresBackendToken": false
+      },
+      "envVars": ["TURN_URLS", "TURN_SHARED_SECRET"]
+    },
+    {
+      "id": "livekit_oss",
+      "name": "LiveKit Open-Source SFU",
+      "categories": ["voice_video_calling", "group_calling", "screen_sharing"],
+      "tier": "open_source",
+      "requiresBillingApproval": false,
+      "capabilities": {
+        "audioCall": true,
+        "videoCall": true,
+        "groupSfu": true,
+        "recommendedMaxPeers": 50,
+        "screenShare": true,
+        "activeSpeakerDetection": true,
+        "requiresBackendToken": true
+      },
+      "envVars": ["LIVEKIT_WS_URL", "LIVEKIT_HTTP_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"]
+    },
+    {
+      "id": "agora",
+      "name": "Agora RTC SDK",
+      "categories": ["voice_video_calling", "group_calling"],
+      "tier": "paid",
+      "requiresBillingApproval": true,
+      "capabilities": {
+        "audioCall": true,
+        "videoCall": true,
+        "groupSfu": true,
+        "screenShare": true,
+        "requiresBackendToken": true
+      },
+      "envVars": ["AGORA_APP_ID", "AGORA_APP_CERTIFICATE"]
+    },
+    {
+      "id": "100ms",
+      "name": "100ms Live Video API",
+      "categories": ["voice_video_calling", "group_calling"],
+      "tier": "paid",
+      "requiresBillingApproval": true,
+      "capabilities": {
+        "audioCall": true,
+        "videoCall": true,
+        "groupSfu": true,
+        "screenShare": true,
+        "requiresBackendToken": true
+      },
+      "envVars": ["HMS_ACCESS_KEY", "HMS_APP_SECRET", "HMS_TEMPLATE_ID"]
+    }
+  ]
+}

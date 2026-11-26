@@ -1,0 +1,57 @@
+{
+  "categories": ["file_media_storage", "video_processing"],
+  "storageProviders": [
+    {
+      "id": "cloudflare_r2",
+      "name": "Cloudflare R2 (Presigned via Media Broker / Backend)",
+      "tier": "free",
+      "freeQuota": "10 GB/month, $0 egress",
+      "requiresBillingApproval": false,
+      "envVars": ["VITE_MEDIA_BROKER_URL", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"]
+    },
+    {
+      "id": "backblaze_b2",
+      "name": "Backblaze B2 (Primary / Secondary Backup)",
+      "tier": "free",
+      "freeQuota": "10 GB free storage",
+      "requiresBillingApproval": false,
+      "envVars": ["B2_KEY_ID", "B2_APPLICATION_KEY", "B2_BUCKET_NAME"]
+    },
+    {
+      "id": "supabase_storage",
+      "name": "Supabase Storage Buckets",
+      "tier": "open_source",
+      "freeQuota": "1 GB free",
+      "requiresBillingApproval": false,
+      "envVars": ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_STORAGE_BUCKET"]
+    },
+    {
+      "id": "gcs",
+      "name": "Google Cloud Storage",
+      "tier": "paid",
+      "freeQuota": "Pay-as-you-go",
+      "requiresBillingApproval": true,
+      "envVars": ["GCS_BUCKET", "GOOGLE_APPLICATION_CREDENTIALS"]
+    }
+  ],
+  "videoProcessingProviders": [
+    {
+      "id": "browser_progressive",
+      "name": "Direct Progressive MP4 / WebM",
+      "tier": "free",
+      "requiresBillingApproval": false
+    },
+    {
+      "id": "ffmpeg_worker",
+      "name": "Self-Hosted FFmpeg HLS Worker",
+      "tier": "open_source",
+      "requiresBillingApproval": false
+    },
+    {
+      "id": "cloudflare_stream",
+      "name": "Cloudflare Stream",
+      "tier": "paid",
+      "requiresBillingApproval": true
+    }
+  ]
+}

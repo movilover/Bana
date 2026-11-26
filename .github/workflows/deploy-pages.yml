@@ -1,0 +1,82 @@
+name: Deploy BANA (User site + Admin) to GitHub Pages
+
+# One repository, one Pages site:
+#   User site : https://<name>.github.io/<repo>/
+#   Admin     : https://<name>.github.io/<repo>/admin/
+# Settings > Pages > Source = "GitHub Actions". Public settings go in
+# Settings > Secrets and variables > Actions > Variables (see BANA_GUIDE_BN.md).
+# NEVER put secret keys (TURN/LiveKit/Agora/R2/service accounts) in variables used here:
+# everything below is compiled into public JavaScript.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - uses: actions/configure-pages@v5
+
+      - name: Work out base path and public URLs
+        id: base
+        run: |
+          REPO="${GITHUB_REPOSITORY#*/}"
+          OWNER="${GITHUB_REPOSITORY_OWNER}"
+          if [[ "$REPO" == *.github.io ]]; then
+            echo "path=/" >> "$GITHUB_OUTPUT"
+            echo "origin=https://${REPO}" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=/${REPO}/" >> "$GITHUB_OUTPUT"
+            echo "origin=https://${OWNER}.github.io/${REPO}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies (user site + admin)
+        run: |
+          npm ci || npm install --no-audit --no-fund
+          npm --prefix admin ci || npm --prefix admin install --no-audit --no-fund
+
+      - name: Type-check (user site + admin)
+        run: npm run lint:all
+
+      - name: Build user site + admin into dist/
+        run: npm run build:all
+        env:
+          VITE_BASE_PATH: ${{ steps.base.outputs.path }}
+          VITE_ADMIN_URL: ${{ vars.VITE_ADMIN_URL || format('{0}/admin/', steps.base.outputs.origin) }}
+          VITE_USER_SITE_URL: ${{ vars.VITE_USER_SITE_URL || steps.base.outputs.origin }}
+          VITE_FIREBASE_PLAN_MODE: ${{ vars.VITE_FIREBASE_PLAN_MODE || 'spark' }}
+          VITE_ENABLE_CLOUD_FUNCTIONS: ${{ vars.VITE_ENABLE_CLOUD_FUNCTIONS || 'false' }}
+          VITE_BACKEND_URL: ${{ vars.VITE_BACKEND_URL }}
+          VITE_MEDIA_BROKER_URL: ${{ vars.VITE_MEDIA_BROKER_URL }}
+          VITE_CALLING_PROVIDER: ${{ vars.VITE_CALLING_PROVIDER || 'webrtc_builtin' }}
+          VITE_ADMIN_IDLE_MINUTES: ${{ vars.VITE_ADMIN_IDLE_MINUTES || '30' }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
